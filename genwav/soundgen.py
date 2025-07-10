@@ -176,8 +176,9 @@ def transform(sound, f):
   return out
 
 def spectrum(sound):
+  l = len(sound) - 256 + 1
+  l -= l % 32
   out = []
-  grid = timegrid * freqgrid * 2 * pi / 256
   for i in range(0, l, 32):
     window = sound[i:i + 256]
     spectrum = numpy.fft.fft(window)

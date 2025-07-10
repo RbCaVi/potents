@@ -50,11 +50,22 @@ with soundgen.setsamplerate(samplerate):
   #soundgen.writewav('testingwave.wav', soundgen.rescale(soundgen.transform(sound, wavewave)))
   #print('wave done')
   
+  #for i in range(10 + 1):
+  #  print(f'cos - h{i}')
+  #  soundgen.writewav(f'testingcos_h{i}.wav', soundgen.rescale(soundgen.transform(sound, cosn(i))))
+  #  print(f'cos done - h{i}')
+  #  
+  #  print(f'sin - h{i}')
+  #  soundgen.writewav(f'testingcos_h{i}.wav', soundgen.rescale(soundgen.transform(sound, sinn(i))))
+  #  print(f'sin done - h{i}')
+  
+  spectrum = soundgen.spectrum(sound)
+  
   for i in range(10 + 1):
     print(f'cos - h{i}')
-    soundgen.writewav(f'testingcos_h{i}.wav', soundgen.rescale(soundgen.transform(sound, cosn(i))))
+    soundgen.writewav(f'testingcos_h{i}.wav', soundgen.rescale(soundgen.transformspectrum(spectrum, cosn(i))))
     print(f'cos done - h{i}')
     
     print(f'sin - h{i}')
-    soundgen.writewav(f'testingcos_h{i}.wav', soundgen.rescale(soundgen.transform(sound, sinn(i))))
+    soundgen.writewav(f'testingsin_h{i}.wav', soundgen.rescale(soundgen.transformspectrum(spectrum, sinn(i))))
     print(f'sin done - h{i}')
