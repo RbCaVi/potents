@@ -232,3 +232,16 @@ def writewav(file, sound):
     f.setframerate(samplerate)
     for samples in batched(sound, 1000):
       f.writeframes(b''.join(struct.pack('h', int(32767 * sample)) for sample in samples))
+
+def readwav(file):
+  with wave.open(file, 'rb') as f:
+    assert f.getnchannels() == 1
+    assert f.getsampwidth() == 2
+    samplerate = f.getframerate()
+    frames = []
+    while True:
+      newframes = [f for f, in struct.iter_unpack('h', f.readframes(1000))]
+      frames += newframes
+      if len(newframes) == 0:
+        break
+  return samplerate, frames
