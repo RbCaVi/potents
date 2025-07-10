@@ -10,6 +10,7 @@ import numpy.fft
 from numpy import sin, cos, pi
 
 coswave = cos
+sinwave = sin
 
 # these two are copied from itertools documentation
 def batched(iterable, n):
@@ -85,6 +86,12 @@ def cos2wave(x):
 
 def cos3wave(x):
   return cos(3 * x)
+
+def sin2wave(x):
+  return sin(2 * x)
+
+def sin3wave(x):
+  return sin(3 * x)
 
 @withsamplecountperiod
 def triangle(samplecount, period):
