@@ -175,6 +175,26 @@ def transform(sound, f):
   #PIL.Image.fromarray(numpy.uint8(x + 128)).show()
   return out
 
+def spectrum(sound):
+  out = []
+  grid = timegrid * freqgrid * 2 * pi / 256
+  for i in range(0, l, 32):
+    window = sound[i:i + 256]
+    spectrum = numpy.fft.fft(window)
+    out.append(spectrum)
+  return out
+
+def transformspectrum(spectrum, f):
+  l = len(spectrum) * 32
+  out = numpy.empty(l)
+  timegrid = numpy.reshape(numpy.arange(256), (256, 1))
+  freqgrid = numpy.arange(256)
+  grid = timegrid * freqgrid * 2 * pi / 256
+  for i,spectrum in enumerate(spectrum):
+    i = i * 32
+    out[i:i + 32] = numpy.mean(numpy.abs(spectrum) * f(grid + numpy.angle(spectrum)), 1)[0:32]
+  return out
+
 def triadditive(harmonics):
   weights = []
   for harmonic in range(harmonics + 1):
