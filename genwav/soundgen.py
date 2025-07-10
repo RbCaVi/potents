@@ -207,10 +207,20 @@ def sawadditive(harmonics):
   return weights
 
 def adjust(sound):
-  # scale a sound so its samples range from -1 to +1
+  # scale and translate a sound so its samples range from -1 to +1
+  # not good for silence - silence will get shifted off 0
   top = numpy.max(sound)
   bottom = numpy.min(sound)
   return (sound - bottom) / (top - bottom) * 2 - 1
+
+def rescale(sound):
+  # scale a sound so the absolute values of its samples range up to +1
+  top = numpy.max(sound)
+  bottom = numpy.min(sound)
+  factor = max(top, -bottom)
+  if factor == 0:
+    return sound
+  return sound / factor
 
 def highestharmonic(basefrequency):
   return floor(samplerate / basefrequency)
