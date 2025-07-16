@@ -60,6 +60,7 @@ with soundgen.setsamplerate(samplerate):
   #  print(f'sin done - h{i}')
   
   spectrum = soundgen.spectrum(sound)
+  spectrum = numpy.array(spectrum)
   
   for i in range(10 + 1):
     print(f'cos - h{i}')
@@ -69,3 +70,15 @@ with soundgen.setsamplerate(samplerate):
     print(f'sin - h{i}')
     soundgen.writewav(f'testingsin_h{i}.wav', soundgen.rescale(soundgen.transformspectrum(spectrum, sinn(i))))
     print(f'sin done - h{i}')
+    
+    spectrum2 = spectrum.copy()
+    w = 128 // max(i, 1)
+    spectrum2[:, w:-w + 1] = 0
+    
+    print(f'coslow - h{i}')
+    soundgen.writewav(f'testingcoslow_h{i}.wav', soundgen.rescale(soundgen.transformspectrum(spectrum2, cosn(i))))
+    print(f'coslow done - h{i}')
+    
+    print(f'sinlow - h{i}')
+    soundgen.writewav(f'testingsinlow_h{i}.wav', soundgen.rescale(soundgen.transformspectrum(spectrum2, sinn(i))))
+    print(f'sinlow done - h{i}')
