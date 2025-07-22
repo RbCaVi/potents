@@ -5,55 +5,137 @@ pygame.font.init()
 
 font = pygame.font.SysFont('dejavusans', 12)
 
+def default(value, default):
+  # return a default value
+  # to avoid the "principle of least surprise" with mutable default arguments
+  if value is None:
+    return default
+  return value
+
+class NodeInput:
+  def __init__(self, name, typ):
+    self.pos = (0, 0) # the position of the draggable circle relative to the connection point
+    self.name = name
+    self.typ = typ # i call it `typ` because `type` gives ugly ahh purple keyword formatting
+    self.connected = True # i don't need to connect backwards right?
+    self.buffer = []
+    self.updatesize()
+  
+  def abspos(self):
+    return addpoints(self.pos, self.parent.pos, (0, self.parent.inputheights[self.parenti]))
+  
+  def updatesize(self):
+    namesize = font.size(self.name)
+    width = 5 + 2 + namesize[0]
+    height = namesize[1]
+    self.size = width, height
+  
+  def draw(self):
+    display = pygame.surface.Surface(self.size, pygame.SRCALPHA)
+    display.fill((0, 0, 0, 0))
+    name = font.render(self.name, True, (0, 0, 0))
+    display.blit(name, (5 + 2, 0))
+    return display
+
 class Node:
   # a node
   # can have inputs and outputs
   # and sliders? maybe like blender - slider or connection
   # inputs and outputs of types
   
-  def __init__(self, pos = (0, 0)):
-    self.pos = pos
-    self.name = "DEFAULT NODE"
-    self.buttons = []
-    self.inputs = []
-    self.outputs = []
+  def __init__(self, pos = None, name = None, inputs = None, outputs = None, widgets = None):
+    self.pos = default(pos, (0, 0))
+    self.name = default(name, "DEFAULT NODE")
+    self.inputs = default(inputs, [])
+    for ii,i in enumerate(self.inputs):
+      i.parent = self
+      i.parenti = ii
+    self.outputs = default(outputs, [])
+    for oi,o in enumerate(self.outputs):
+      o.parent = self
+      o.parenti = oi
+    self.widgets = default(widgets, [])
+    self.updatesize()
+    self.layoutconnections()
   
   def update(self):
+    # update the outputs with the inputs
+    # i'm not sure how this should work
+    # push or pull?
+    # push probably
+    # read available input and push some output
+    for w in self.widgets:
+      w.update()
     pass
   
-  def size(self):
-    return 200, 20
+  def updatesize(self):
+    namesize = font.size(self.name)
+    width = max(
+      namesize[0],
+      # two 0's because max treats a single argument as an iterable
+      max(*(i.size[0] for i in self.inputs), 0, 0) + max(*(o.size[0] for o in self.outputs), 0, 0),
+      *(w.minwidth() for w in self.widgets)
+    )
+    height = (
+      namesize[1] +
+      max(sum(i.size[1] for i in self.inputs), sum(o.size[1] for o in self.outputs)) +
+      sum(w.height() for w in self.widgets)
+    )
+    self.size = width, height
+  
+  def layoutconnections(self):
+    # does this need to exist?
+    # maybe not if all connections have the same height?
+    # also i'm assuming the connections are centered vertically
+    iy = 0
+    self.inputheights = []
+    for i in self.inputs:
+      ih = i.size[1]
+      self.inputheights.append(iy + ih / 2)
+      iy += ih
+    oy = 0
+    self.outputheights = []
+    for o in self.outputs:
+      oh = o.size[1]
+      self.outputheights.append(oy + oh / 2)
+      oy += oh
   
   def draw(self):
-    display = pygame.surface.Surface(self.size(), pygame.SRCALPHA)
+    display = pygame.surface.Surface(self.size, pygame.SRCALPHA) # per pixel alpha because i want to have rounded corners <3
     display.fill((128, 128, 128))
     name = font.render(self.name, True, (0, 0, 0))
     display.blit(name, ((display.get_width() - name.get_width()) / 2, 0))
+    iy = name.get_height()
+    for i in self.inputs:
+      ir = i.draw()
+      display.blit(ir, (0, iy))
+      iy += i.size[1]
     return display
   
   def bounds(self):
-    return pygame.Rect(self.pos, self.size())
+    return pygame.Rect(self.pos, self.size)
   
   def mousepressed(self, pos):
     # called when the node is clicked on
     # return True means captured by a gui element
-    # meaning it's not getting dragged
+    # meaning it won't get dragged
     return False
   
   def mousedragged(self, rel):
-    # only fires if mousepressed() returned True
+    # only called if mousepressed() returned True
     # deals with sliders etc
     pass
 
-def addpoint(p1, p2):
-  return p1[0] + p2[0], p1[1] + p2[1]
+def addpoints(*ps):
+  # tm
+  return tuple(map(sum, zip(*ps)))
 
 pygame.init()
 
 display = pygame.display.set_mode((640, 480), pygame.RESIZABLE)
 clock = pygame.time.Clock()
 
-nodes = [Node(), Node()]
+nodes = [Node(inputs = [NodeInput('the', 'none')]), Node()]
 
 focus = None
 focuscaptured = False
@@ -82,7 +164,7 @@ while True:
           focus.mousedragged(event.rel)
         else:
           #print(focus.pos, event.rel)
-          focus.pos = addpoint(focus.pos, event.rel)
+          focus.pos = addpoints(focus.pos, event.rel)
     if event.type == pygame.MOUSEBUTTONUP:
       focus = None
       focuscaptured = False
