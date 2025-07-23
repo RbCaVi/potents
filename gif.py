@@ -225,7 +225,7 @@ def lzwdecompress(data, symbolsize):
 
 seenapplicationblock = False
 comments = []
-c = 0
+c = 1
 for block in blocks:
   if block[0] == 'ext':
     _,blocktype,blockdata = block
@@ -246,7 +246,7 @@ for block in blocks:
         assert aac == b'2.0'
         bid,loopcount = struct.unpack('<BH', blockdata)
         assert bid == 1
-        print('loop count:', loopcount)
+        #print('loop count:', loopcount)
       else:
         assert False, f'unrecognized application: {aid}'
     elif blocktype == 0xF9: # graphical control
@@ -261,11 +261,9 @@ for block in blocks:
       # 0x01 for plain text display - section 25
       assert False, f'unrecognized extension id: {block[1]}'
   elif block[0] == 'img':
-    print(block[:-1], ' '.join(bin(n + 256)[3:][::-1] for n in block[-1][:20]))
-    c += 1
+    #print(block[:-1], ' '.join(bin(n + 256)[3:][::-1] for n in block[-1][:20]))
     w,h = block[1][2], block[1][3]
-    PIL.Image.fromarray(numpy.reshape([*lzwdecompress(block[-1], block[-2])], (h, w)).astype(numpy.uint8)).show()
-    if c > 5:
-      assert False
+    PIL.Image.fromarray(numpy.reshape([*lzwdecompress(block[-1], block[-2])], (h, w)).astype(numpy.uint8)).save(f'out/frame{c}.png')
+    c += 1
   else:
     assert False, f'unrecognized block type: {block[0]}'
