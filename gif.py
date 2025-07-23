@@ -11,7 +11,7 @@
 #     width, height - u16 * 2
 #     flags - byte:
 #       has global color table (gct) - 1 bit
-#       color resolution - 3 bits - bits in color components
+#       color resolution - 3 bits - bits in color components-1
 #       gct is sorted - 1 bit - idk just put 0
 #       log2(gct size)-1 - 3 bits - the size is 2 ^ (@ + 1)
 #     background color index - u8 - only applicable if has gct
