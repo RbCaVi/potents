@@ -257,13 +257,19 @@ for block in blocks:
       userinput = frombit(flags[6:7])
       transparent = frombit(flags[7:8])
       print(disposal, userinput, transparent, delay, transp)
+      if not transparent:
+        transp = 256
     else:
       # 0x01 for plain text display - section 25
       assert False, f'unrecognized extension id: {block[1]}'
   elif block[0] == 'img':
     #print(block[:-1], ' '.join(bin(n + 256)[3:][::-1] for n in block[-1][:20]))
     w,h = block[1][2], block[1][3]
-    PIL.Image.fromarray(numpy.reshape([*lzwdecompress(block[-1], block[-2])], (h, w)).astype(numpy.uint8)).save(f'out/frame{c}.png')
+    imarr = numpy.reshape([*lzwdecompress(block[-1], block[-2])], (h, w)).astype(numpy.uint8)
+    im = PIL.Image.fromarray(imarr)
+    im.putalpha(PIL.Image.fromarray(imarr != transp))
+    im.putpalette(sum(gct, ()))
+    im.convert('RGBA').save(f'out/frame{c}.png')
     c += 1
   else:
     assert False, f'unrecognized block type: {block[0]}'
