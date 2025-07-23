@@ -223,9 +223,9 @@ def lzwdecompress(data, symbolsize):
     last = symbol
     yield from dictionary[symbol]
 
-seenapplicationblock = False
 comments = []
 c = 1
+frame = PIL.Image.new('RGBA', (w, h), (0, 0, 0, 0))
 for block in blocks:
   if block[0] == 'ext':
     _,blocktype,blockdata = block
@@ -267,9 +267,14 @@ for block in blocks:
     w,h = block[1][2], block[1][3]
     imarr = numpy.reshape([*lzwdecompress(block[-1], block[-2])], (h, w)).astype(numpy.uint8)
     im = PIL.Image.fromarray(imarr)
-    im.putalpha(PIL.Image.fromarray(imarr != transp))
     im.putpalette(sum(gct, ()))
-    im.convert('RGBA').save(f'out/frame{c}.png')
+    im = im.convert('RGB')
+    if disposal == 1:
+      frame.paste(im, (block[1][0], block[1][1], block[1][0] + block[1][2], block[1][1] + block[1][3]), PIL.Image.fromarray(imarr != transp))
+      im = frame
+    else:
+      assert False, 'unrecognized disposal :('
+    im.save(f'out/frame{c}.png')
     c += 1
   else:
     assert False, f'unrecognized block type: {block[0]}'
