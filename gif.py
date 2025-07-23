@@ -1,3 +1,66 @@
+# from https://www.w3.org/Graphics/GIF/spec-gif89a.txt
+# and https://stackoverflow.com/a/28486261
+# data blocks is a series of chunks
+#   length - u8
+#   data - `length` bytes
+# and ends with a 0 length chunk
+# a gif is made of:
+#   header
+#     magic - 'GIF'
+#     version - '87a' or '89a' (mine does 89a)
+#     width, height - u16 * 2
+#     flags - byte:
+#       has global color table (gct) - 1 bit
+#       color resolution - 3 bits - bits in color components
+#       gct is sorted - 1 bit - idk just put 0
+#       log2(gct size)-1 - 3 bits - the size is 2 ^ (@ + 1)
+#     background color index - u8 - only applicable if has gct
+#     aspect ratio - u8 - 0 for no aspect ratio given - otherwise (@ + 15 / 64)
+#   gct (optional) - u8 * 3 * gct size - red green blue for each color
+#   sequence of blocks - each one has a one byte identifying code
+#     extension - 0x21 - another byte for extension type and then a series of data blocks
+#       comment - 0xFE
+#         data blocks contain a textual (probably) comment
+#       application - 0xFF
+#         first block contains
+#           application - 8 byte text string
+#           authentication code - 3 bytes
+#         the rest of the data:
+#         code NETSCAPE2.0 is an animated gif (the kind you find on tenor)
+#         it has 3 bytes of data after the application code:
+#           id - byte - 0x01
+#           loop count - u16 - 0 means forever
+#       graphic control - 0xF9 - 4 bytes of data
+#         flags - byte
+#           reserved - 3 bits
+#           disposal - 3 bits
+#             no disposal specified - 0
+#             leave graphic - 1 - don't clear it after drawing
+#             restore to background - 2
+#             restore to previous - 3
+#           needs user input - 1 bit (i'm ignoring this <3)
+#           has transparent color - 1 bit
+#         delay - u16 - in 1/100 second
+#         transparent color index - u8
+#       plain text display - 0x01
+#         no :)
+#     image data - 0x2C
+#       left, top, width, height - u16 * 4
+#       flags - byte
+#         has local color table (lct) - 1 bit
+#         is interlaced - 1 bit (no please)
+#         lct is sorted - 1 bit - again just put 0 i guess
+#         reserved - 2 bits
+#         log2(lct size)-1 - 3 bits - the size is 2 ^ (@ + 1)
+#       lct (optional) - same as gct
+#       image data - as data blocks
+#         lzw initial code size - why is this here? - this should (always?) be log2(lct/gct size)
+#         lzw compressed data of the image - 256 color paletted
+#     trailer (end) - 0x3B - ends gif stream - nothing after this
+# the lzw compression has variable length codes
+# you can read about it on wikipedia (https://en.wikipedia.org/wiki/Lempel%E2%80%93Ziv%E2%80%93Welch) and appendix f of the specification
+# it has the first two symbols after the single colors being reset decoder state and end image data (which is a bit redundant)
+
 import struct
 
 import PIL.Image
