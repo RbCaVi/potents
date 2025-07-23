@@ -1,7 +1,7 @@
-with open('cupcake.gif', 'rb') as f:
-  data = f.read()
-
 import struct
+
+import PIL.Image
+import numpy
 
 class DataSlice:
   # a slice of bytes
@@ -28,20 +28,9 @@ class DataSlice:
     # returns the first byte as an integer
     return self.unpackbytes(1)[0]
 
-data = DataSlice(data)
-
-assert data.unpackbytes(3) == b'GIF'
-
 def assertp(x, predicate):
   assert predicate(x)
   return x
-
-version = assertp(data.unpackbytes(3), lambda x: x in [b'87a', b'89a'])
-print('version', version)
-
-w,h,flags,bgcol,aspect = data.unpackstruct('<HHBBB')
-print('size', w, h)
-print('aspect', aspect)
 
 def asbits(n, bits):
   top = 2 ** bits
@@ -57,14 +46,6 @@ def frombits(bits):
 
 def frombit(bit):
   return bit == '1'
-
-flags = asbits(flags, 8)
-hasgct = frombit(flags[0:1])
-colorbits = frombits(flags[1:4])
-gctsorted = frombit(flags[4:5])
-gctbits = frombits(flags[5:8])
-
-print('colorsize 2 ^', colorbits + 1)
 
 def hexcomponent(n):
   assert n >= 0 and n < 256
@@ -91,27 +72,11 @@ def showcolortable(table):
   
   PIL.Image.fromarray(numpy.reshape(table, (w, h, 3)).astype(numpy.uint8)).resize((w * 30, h * 30), PIL.Image.Resampling.NEAREST).show()
 
-import PIL.Image
-import numpy
-
 def unpackcolortable(data, tablebits):
   tablesize = 2 ** (tablebits + 1)
   tabledata = data.unpackbytes(3 * tablesize)
   table = [*struct.iter_unpack('<BBB', tabledata)]
   return table
-
-if hasgct:
-  gct = unpackcolortable(data, gctbits)
-  
-  #print('gct')
-  #print('sorted:', gctsorted)
-  #print('bgidx:', bgcol)
-  #printcolortablehex(gct)
-  #showcolortable(gct)
-else:
-  gct = None
-  
-  #print('no global color table')
 
 def unpackblocks(data):
   out = b''
@@ -144,21 +109,6 @@ def unpackimdesc(data):
   lzwencoded = unpackblocks(data)
   
   return ['img', (left, top, w, h), interlace, lct, lctsorted, lzwcodesize, lzwencoded]
-
-blocks = []
-while True:
-  btype = data.unpackbyte()
-  if btype == 0x21: # extension
-    blocks.append(unpackextension(data))
-  elif btype == 0x2C: # image descriptor
-    blocks.append(unpackimdesc(data))
-  elif btype == 0x3B: # end
-    assert data.offset == len(data.buf)
-    break
-  else:
-    data.offset -= 1
-    print(data.buf[data.offset:][:100])
-    assert False, f'unrecognized leading byte {btype}'
 
 # return an iterator of symbols
 def lzwsymbols(data, symbolsize):
@@ -195,9 +145,6 @@ def lzwsymbols(data, symbolsize):
     if symbol == end:
       break
 
-
-
-
 def lzwdecompress(data, symbolsize):
   clear = 2 ** (symbolsize)
   end = clear + 1
@@ -222,6 +169,56 @@ def lzwdecompress(data, symbolsize):
       nextsymbol += 1
     last = symbol
     yield from dictionary[symbol]
+
+with open('cupcake.gif', 'rb') as f:
+  data = f.read()
+
+data = DataSlice(data)
+
+assert data.unpackbytes(3) == b'GIF'
+
+version = assertp(data.unpackbytes(3), lambda x: x in [b'87a', b'89a'])
+print('version', version)
+
+w,h,flags,bgcol,aspect = data.unpackstruct('<HHBBB')
+print('size', w, h)
+print('aspect', aspect)
+
+flags = asbits(flags, 8)
+hasgct = frombit(flags[0:1])
+colorbits = frombits(flags[1:4])
+gctsorted = frombit(flags[4:5])
+gctbits = frombits(flags[5:8])
+
+print('colorsize 2 ^', colorbits + 1)
+
+if hasgct:
+  gct = unpackcolortable(data, gctbits)
+  
+  #print('gct')
+  #print('sorted:', gctsorted)
+  #print('bgidx:', bgcol)
+  #printcolortablehex(gct)
+  #showcolortable(gct)
+else:
+  gct = None
+  
+  #print('no global color table')
+
+blocks = []
+while True:
+  btype = data.unpackbyte()
+  if btype == 0x21: # extension
+    blocks.append(unpackextension(data))
+  elif btype == 0x2C: # image descriptor
+    blocks.append(unpackimdesc(data))
+  elif btype == 0x3B: # end
+    assert data.offset == len(data.buf)
+    break
+  else:
+    data.offset -= 1
+    print(data.buf[data.offset:][:100])
+    assert False, f'unrecognized leading byte {btype}'
 
 comments = []
 c = 1
