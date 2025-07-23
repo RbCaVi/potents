@@ -54,7 +54,7 @@
 #         log2(lct size)-1 - 3 bits - the size is 2 ^ (@ + 1)
 #       lct (optional) - same as gct
 #       image data - as data blocks
-#         lzw initial code size - why is this here? - this should (always?) be log2(lct/gct size)
+#         lzw initial code size - why is this here? - this should (always?) be log2(lct/gct size) - except it has a minimum of 2
 #         lzw compressed data of the image - 256 color paletted
 #     trailer (end) - 0x3B - ends gif stream - nothing after this
 # the lzw compression has variable length codes
