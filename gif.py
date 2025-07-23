@@ -264,7 +264,8 @@ for block in blocks:
     w,h = block[1][2], block[1][3]
     imarr = numpy.reshape([*lzwdecompress(block[-1], block[-2])], (h, w)).astype(numpy.uint8)
     im = PIL.Image.fromarray(imarr)
-    im.putpalette(sum(gct, ()))
+    palette = block[3] if block[3] is not None else gct
+    im.putpalette(sum(palette, ()))
     im = im.convert('RGB')
     if disposal == 1:
       frame.paste(im, (block[1][0], block[1][1], block[1][0] + block[1][2], block[1][1] + block[1][3]), PIL.Image.fromarray(imarr != transp))
