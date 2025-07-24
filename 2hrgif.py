@@ -190,11 +190,11 @@ def packlzw(symbols, symsize):
   back = 0
   for sym in symbols:
     dictsize += 1
-    print(sym, symsize, bin(n)[2:].rjust(back, '0'), back)
+    #print(sym, symsize, bin(n)[2:].rjust(back, '0'), back)
     #print(bin(sym << back)[2:].rjust(back, '0'))
     n |= sym << back
     back += symsize
-    print(sym, symsize, bin(n)[2:].rjust(back, '0'), back)
+    #print(sym, symsize, bin(n)[2:].rjust(back, '0'), back)
     while back >= 8:
       byte = n & 255
       n >>= 8
@@ -220,7 +220,7 @@ def imagedatablock(left, top, width, height, imdata):
     + struct.pack('<HHHHB', left, top, width, height, flags) +
     b'\x02' # 2 bit lzw starting code size
     + asdatablocks(bytes(packlzw(lzwencode(imdata, 2), 3)))
-  ) # 15 bytes
+  )
 
 # a comment extension block <333
 # comment - 0xFE
@@ -250,7 +250,7 @@ data += b''.join([
   imagedatablock(0, 0, 2, 2, [3, 2, 1, 0]),
   graphiccontrolblock(25),
   imagedatablock(0, 0, 2, 2, [1, 3, 0, 2]),
-  trailerblock
+  trailerblock,
 ])
 
 with open('out/hours.gif', 'wb') as f:
