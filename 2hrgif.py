@@ -82,8 +82,8 @@ data = b'GIF89a'
 # background color index - u8 - only applicable if has gct
 # aspect ratio - u8 - 0 for no aspect ratio given - otherwise (@ + 15 / 64)
 
-width = 5
-height = 5
+width = 36
+height = 36
 flags = 0b1_111_0_001 # 8 bit colors - 2 bit unsorted gct (4 colors)
 bgcolor = 0 # does this matter if i don't clear to background?
 aspect = 0 # no aspect ratio - probably doesn't matter in these modern times
@@ -94,7 +94,7 @@ palette = [
   (0, 0, 0), # black
   (255, 255, 255), # white
   (255, 0, 0), # red
-  (0, 255, 0), # green
+  (0, 255, 255), # eye-blasting blue
 ]
 for r,g,b in palette:
   data += struct.pack('<BBB', r, g, b)
@@ -130,9 +130,12 @@ netscapeapplicationblock = (
 #   delay - u16 - in 1/100 second
 #   transparent color index - u8
 
-def graphiccontrolblock(delay):
+def graphiccontrolblock(delay, transparent = None):
   flags = 0b000_001_0_0 # no transparency - leave graphic
   transp = 0 # no transparency
+  if transparent is not None:
+    flags |= 1
+    transp = transparent
 
   return (
     b'\x21\xf9' # signature
@@ -229,8 +232,7 @@ def imagedatablock(left, top, width, height, imdata):
 def commentblock(message):
   return (
     b'\x21\xfe' # signature
-    + struct.pack('<B', len(message)) + message + # single block
-    b'\x00' # terminator
+    + asdatablocks(message) # message
   )
 
 # end
@@ -240,18 +242,65 @@ trailerblock = (
   b'\x3b' # terminator
 )
 
-data += b''.join([
-  netscapeapplicationblock,
-  graphiccontrolblock(25),
-  imagedatablock(0, 0, 2, 2, [0, 1, 2, 3]),
-  graphiccontrolblock(25),
-  imagedatablock(0, 0, 2, 2, [2, 0, 3, 1]),
-  graphiccontrolblock(25),
-  imagedatablock(0, 0, 2, 2, [3, 2, 1, 0]),
-  graphiccontrolblock(25),
-  imagedatablock(0, 0, 2, 2, [1, 3, 0, 2]),
-  trailerblock,
-])
+data += netscapeapplicationblock
+
+data += commentblock(b'hi guys! i had the great idea to make a 2 hour gif that fits in 3 mb')
+
+pixels = [1] * 36 * 36
+for i in range(0, 36, 6):
+  pixels[i:i + 36 * 36:36] = [0] * 36
+  pixels[i + 5:i + 5 + 36 * 36:36] = [0] * 36
+  pixels[i * 36:(i + 1) * 36] = [0] * 36
+  pixels[(i + 5) * 36:(i + 6) * 36] = [0] * 36
+data += graphiccontrolblock(25)
+data += imagedatablock(0, 0, 36, 36, pixels)
+
+data += commentblock(b'there\'s some secret messages for no reason (not yet)')
+data += commentblock(b'just to give you something to pass the time for 2 hours while you stare at this gif <3')
+
+# snake
+
+states = [[0 for _ in range(6)] for _ in range(6)]
+
+x = 0
+y = 0
+
+message1 = b'ooooo secrets snake idk lorem ipsum dolor sit amet weezer jonathan l booz paddin'
+message2 = b'what do you think of my "stegography"? message me on discord (you know who i am)'
+message3 = b'what if i told you my darkest secrets to keep the conversation going padding pad'
+message4 = b'https://c.tenor.com/UQXtmsgZS68AAAAd/tenor.gif (cupcake.gif <33) adiciscing elit'
+
+def tobits(bs): # assuming the message is all printable
+  return [ord(c) - ord('0') for c in ''.join(bin(b)[2:].rjust(7, '0')[::-1] for b in bs)]
+
+bits1 = tobits(message1)
+bits2 = tobits(message2)
+bits3 = tobits(message3)
+bits4 = tobits(message4)
+
+directions = []
+
+for bit1,bit2,bit3,bit4 in zip(bits1, bits2, bits3, bits4):
+  directions += [[0, 2][bit1]] * (bit2 + 1)
+  directions += [[1, 3][bit3]] * (bit4 + 1)
+
+directions += [0]
+
+dx = [1, 0, -1, 0]
+dy = [0, 1, 0, -1]
+
+for direction in directions:
+  states[x][y] = {0: 2, 2: 3, 3: 2}[states[x][y]]
+  data += graphiccontrolblock(25)
+  data += imagedatablock(x * 6 + 1, y * 6 + 1, 4, 4, [states[x][y]] * 16)
+  x += dx[direction]
+  x %= 6
+  y += dy[direction]
+  y %= 6
+
+data += commentblock(b'you should probably write some kind of program to decode this tbh frfr')
+
+data += trailerblock
 
 with open('out/hours.gif', 'wb') as f:
   f.write(data)
