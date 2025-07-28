@@ -1,4 +1,5 @@
 import struct
+import numpy
 
 from writegif import header, netscapeapplicationblock, commentblock, graphiccontrolblock, imagedatablock, trailerblock
 
@@ -12,6 +13,9 @@ from writegif import header, netscapeapplicationblock, commentblock, graphiccont
 # and an application extension block
 # so you know it's a Netscape Animated Gif Tm
 
+w = 36
+h = 36
+
 palette = [
   (0, 0, 0), # black
   (255, 255, 255), # white
@@ -20,27 +24,39 @@ palette = [
 ]
 
 data = [
-  header(36, 36, palette),
+  header(w, h, palette),
   netscapeapplicationblock,
   commentblock(b'hi guys! i had the great idea to make a 2 hour gif that fits in 3 mb'),
 ]
 
-pixels = [1] * 36 * 36
-for i in range(0, 36, 6):
-  pixels[i:i + 36 * 36:36] = [0] * 36
-  pixels[i + 5:i + 5 + 36 * 36:36] = [0] * 36
-  pixels[i * 36:(i + 1) * 36] = [0] * 36
-  pixels[(i + 5) * 36:(i + 6) * 36] = [0] * 36
+buffer = numpy.full((w, h), -1)
 
-data.append(graphiccontrolblock(25))
-data.append(imagedatablock(0, 0, 36, 36, pixels))
+def newframe(frame, delay):
+  changed = buffer != frame# & frame != -1
+  yi,xi = numpy.nonzero(changed)
+  ymin,ymax = min(yi), max(yi)
+  xmin,xmax = min(xi), max(xi)
+  frame[~changed] = -1
+  frame = frame[ymin:ymax + 1, xmin:xmax + 1]
+  colors = numpy.unique(frame)
+  transp = min(x for x in range(max(colors) + 2) if x not in colors)
+  frame[frame == -1] = transp
+  return [graphiccontrolblock(delay, transp), imagedatablock(xmin, ymin, xmax - xmin + 1, ymax - ymin + 1, frame.flat)]
 
-data.append(commentblock(b'there\'s some secret messages for no reason (not yet)'))
+pixels = numpy.full((36, 36), 3)
+pixels[0:36:6, :] = 0
+pixels[5:36:6, :] = 0
+pixels[:, 0:36:6] = 0
+pixels[:, 5:36:6] = 0
+
+data += newframe(pixels, 25)
+
+data.append(commentblock(b'there\'s some secret messages'))
 data.append(commentblock(b'just to give you something to pass the time for 2 hours while you stare at this gif <3'))
 
 # snake
 
-states = [[0 for _ in range(6)] for _ in range(6)]
+states = [[3 for _ in range(6)] for _ in range(6)]
 
 x = 0
 y = 0
@@ -71,8 +87,9 @@ dy = [0, 1, 0, -1]
 
 for direction in directions:
   states[x][y] = {0: 2, 2: 3, 3: 2}[states[x][y]]
-  data.append(graphiccontrolblock(25))
-  data.append(imagedatablock(x * 6 + 1, y * 6 + 1, 4, 4, [states[x][y]] * 16))
+  pixels = numpy.full((36, 36), -1)
+  pixels[y * 6 + 1:y * 6 + 5, x * 6 + 1:x * 6 + 5] = states[x][y]
+  data += newframe(pixels, 25)
   x += dx[direction]
   x %= 6
   y += dy[direction]
