@@ -24,6 +24,9 @@ class NodeInput:
   def abspos(self):
     return addpoints(self.pos, self.parent.pos, (0, self.parent.inputheights[self.parenti]))
   
+  def socketrect(self):
+    return (addpoints(self.abspos(), (-4, -4)), (8, 8))
+  
   def updatesize(self):
     namesize = font.size(self.name)
     width = 5 + 2 + namesize[0]
@@ -87,13 +90,14 @@ class Node:
     # does this need to exist?
     # maybe not if all connections have the same height?
     # also i'm assuming the connections are centered vertically
-    iy = 0
+    namesize = font.size(self.name)
+    iy = namesize[1]
     self.inputheights = []
     for i in self.inputs:
       ih = i.size[1]
       self.inputheights.append(iy + ih / 2)
       iy += ih
-    oy = 0
+    oy = namesize[1]
     self.outputheights = []
     for o in self.outputs:
       oh = o.size[1]
@@ -171,5 +175,7 @@ while True:
   display.fill((255, 255, 255))
   for node in nodes:
     display.blit(node.draw(), node.pos)
+    for inp in node.inputs:
+      pygame.draw.rect(display, (200, 200, 200), inp.socketrect())
   pygame.display.update()
   clock.tick(60)
