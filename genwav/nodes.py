@@ -22,10 +22,13 @@ class NodeInput:
     self.updatesize()
   
   def abspos(self):
-    return addpoints(self.pos, self.parent.pos, (0, self.parent.inputheights[self.parenti]))
+    return addpoints(self.pos, self.wirepos())
+  
+  def wirepos(self):
+    return addpoints(self.parent.pos, (0, self.parent.inputheights[self.parenti]))
   
   def socketrect(self):
-    return (addpoints(self.abspos(), (-4, -4)), (8, 8))
+    return pygame.Rect(addpoints(self.abspos(), (-4, -4)), (8, 8))
   
   def updatesize(self):
     namesize = font.size(self.name)
@@ -178,6 +181,7 @@ while True:
   for node in nodes:
     display.blit(node.draw(), node.pos)
     for inp in node.inputs:
+      pygame.draw.line(display, (0, 0, 0), inp.wirepos(), inp.abspos())
       pygame.draw.rect(display, (200, 200, 200), inp.socketrect())
   pygame.display.update()
   clock.tick(60)
