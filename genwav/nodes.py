@@ -157,6 +157,12 @@ class Node:
   def bounds(self):
     return pygame.Rect(self.pos, self.size)
   
+  def captures(self, pos):
+    # called when the node is clicked on
+    # return True means captured by a gui element
+    # meaning it won't get dragged
+    return False
+  
   def mousepressed(self, pos):
     # called when the node is clicked on
     # return True means captured by a gui element
@@ -164,6 +170,11 @@ class Node:
     return False
   
   def mousedragged(self, rel):
+    # only called if mousepressed() returned True
+    # deals with sliders etc
+    pass
+  
+  def mousereleased(self):
     # only called if mousepressed() returned True
     # deals with sliders etc
     pass
@@ -202,8 +213,17 @@ while True:
         nextfocus = FOCUSNODEOUTPUT, outp
   #print(focusi)
   if focus[0] == FOCUSDRAGNODE:
-    if focus[1].mousepressed(event.pos):
+    if focus[1].captures(mpos):
       nextfocus = FOCUSNODE, node
+  if focus[0] == FOCUSNODEINPUT:
+    mindist = 1000
+    for node in nodes:
+      for outp in node.outputs:
+        pass
+        # find the closest output
+        # and save it in a variable if it's close enough
+        # for highlighting later
+    # do the same for output
   for event in pygame.event.get():
     if event.type == pygame.QUIT:
       sys.exit()
@@ -211,9 +231,11 @@ while True:
       #print(event)
       if event.button == 1:
         focus = nextfocus
+      if focus[0] == FOCUSNODE:
+        focus[1].mousepressed(event.pos) # i'm assuming the mouse position hasn't changed
     if event.type == pygame.MOUSEMOTION:
       if focus[0] == FOCUSNODE:
-        focus.mousedragged(event.rel)
+        focus[1].mousedragged(event.rel)
       if focus[0] == FOCUSDRAGNODE:
         #print(focus.pos, event.rel)
         focus[1].pos = addpoints(focus[1].pos, event.rel)
@@ -224,15 +246,22 @@ while True:
         #print(focus.pos, event.rel)
         focus[1].pos = addpoints(focus[1].pos, event.rel)
     if event.type == pygame.MOUSEBUTTONUP:
+      if focus[0] == FOCUSNODE:
+        focus[1].mousereleased()
+      if focus[0] == FOCUSNODEINPUT:
+        # use the nearby output found earlier to connect to (if it exists)
+        pass
+      if focus[0] == FOCUSNODEOUTPUT:
+        pass
       focus = NOFOCUS
   display.fill((255, 255, 255))
   for node in nodes:
     display.blit(node.draw(), node.pos)
     for inp in node.inputs:
-      pygame.draw.line(display, (0, 0, 0), inp.wirepos(), inp.abspos())
+      pygame.draw.line(display, (0, 0, 0), inp.wirepos(), inp.abspos()) # change the color if this one is selected or can get connected
       pygame.draw.rect(display, (200, 200, 200), inp.socketrect())
     for outp in node.outputs:
-      pygame.draw.line(display, (0, 0, 0), outp.wirepos(), outp.abspos())
+      pygame.draw.line(display, (0, 0, 0), outp.wirepos(), outp.abspos()) # change the color if this one is selected or can get connected
       pygame.draw.rect(display, (200, 200, 200), outp.socketrect())
   pygame.display.update()
   clock.tick(60)
