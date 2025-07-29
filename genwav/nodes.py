@@ -1,5 +1,6 @@
 import pygame
 import sys
+import math
 
 pygame.font.init()
 
@@ -17,7 +18,7 @@ class NodeInput:
     self.pos = (0, 0) # the position of the draggable circle relative to the connection point
     self.name = name
     self.typ = typ # i call it `typ` because `type` gives ugly ahh purple keyword formatting
-    self.connected = True # i don't need to connect backwards right?
+    self.connected = None
     self.buffer = []
     self.updatesize()
   
@@ -42,6 +43,18 @@ class NodeInput:
     name = font.render(self.name, True, (0, 0, 0))
     display.blit(name, (4 + 2, 0))
     return display
+  
+  def connect(self, other):
+    if other is not None:
+      self.connected = other
+      self.connected.connected.append(self)
+      self.pos = (0, 0)
+      self.connected.pos = (0, 0)
+  
+  def disconnect(self):
+    if self.connected is not None:
+      self.connected.connected.remove(self)
+      self.connected = None
 
 class NodeOutput:
   def __init__(self, name, typ):
@@ -183,12 +196,22 @@ def addpoints(*ps):
   # tm
   return tuple(map(sum, zip(*ps)))
 
+def distance2(p1, p2):
+  return sum((c1 - c2) ** 2 for c1,c2 in zip(p1, p2))
+
+def distance(p1, p2):
+  return math.sqrt(distance2(p1, p2))
+
 pygame.init()
 
 display = pygame.display.set_mode((640, 480), pygame.RESIZABLE)
 clock = pygame.time.Clock()
 
-nodes = [Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]), Node()]
+nodes = [
+  Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]),
+  Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]),
+  Node(),
+]
 
 # focus: (NOFOCUS) | (FOCUSDRAGNODE, node) | (FOCUSNODE, node) | (FOCUSNODEINPUT, inp) | (FOCUSNODEOUTPUT, outp)
 NOFOCUS         = 0, # comma to make it a tuple so i don't need a comma everywhere i use it
@@ -215,15 +238,26 @@ while True:
   if focus[0] == FOCUSDRAGNODE:
     if focus[1].captures(mpos):
       nextfocus = FOCUSNODE, node
+  closestoutput = None
+  closestinput = None
   if focus[0] == FOCUSNODEINPUT:
-    mindist = 1000
+    mindist = 30
     for node in nodes:
+      fpos = focus[1].abspos()
       for outp in node.outputs:
-        pass
-        # find the closest output
-        # and save it in a variable if it's close enough
-        # for highlighting later
-    # do the same for output
+        dist = distance(outp.abspos(), fpos)
+        if dist < mindist:
+          mindist = dist
+          closestoutput = outp
+  if focus[0] == FOCUSNODEOUTPUT:
+    mindist = 30
+    for node in nodes:
+      fpos = focus[1].abspos()
+      for inp in node.inputs:
+        dist = distance(inp.abspos(), fpos)
+        if dist < mindist:
+          mindist = dist
+          closestinput = inp
   for event in pygame.event.get():
     if event.type == pygame.QUIT:
       sys.exit()
@@ -233,6 +267,8 @@ while True:
         focus = nextfocus
       if focus[0] == FOCUSNODE:
         focus[1].mousepressed(event.pos) # i'm assuming the mouse position hasn't changed
+      if focus[0] == FOCUSNODEINPUT:
+        focus[1].disconnect()
     if event.type == pygame.MOUSEMOTION:
       if focus[0] == FOCUSNODE:
         focus[1].mousedragged(event.rel)
@@ -249,19 +285,33 @@ while True:
       if focus[0] == FOCUSNODE:
         focus[1].mousereleased()
       if focus[0] == FOCUSNODEINPUT:
-        # use the nearby output found earlier to connect to (if it exists)
-        pass
+        focus[1].connect(closestoutput)
       if focus[0] == FOCUSNODEOUTPUT:
-        pass
+        closestinput.connect(focus[1])
       focus = NOFOCUS
   display.fill((255, 255, 255))
   for node in nodes:
     display.blit(node.draw(), node.pos)
     for inp in node.inputs:
-      pygame.draw.line(display, (0, 0, 0), inp.wirepos(), inp.abspos()) # change the color if this one is selected or can get connected
-      pygame.draw.rect(display, (200, 200, 200), inp.socketrect())
+      if inp.connected is not None:
+        pygame.draw.line(display, (0, 0, 0), inp.wirepos(), inp.connected.wirepos())
+      else:
+        pygame.draw.line(display, (0, 0, 0), inp.wirepos(), inp.abspos())
+      # change the color if this one is selected or can get connected
+      color = (200, 200, 200)
+      if focus[0] == FOCUSNODEINPUT and inp is focus[1]:
+        color = (255, 255, 100)
+      if focus[0] == FOCUSNODEOUTPUT and inp is closestinput:
+        color = (150, 150, 255)
+      pygame.draw.rect(display, color, inp.socketrect())
     for outp in node.outputs:
-      pygame.draw.line(display, (0, 0, 0), outp.wirepos(), outp.abspos()) # change the color if this one is selected or can get connected
-      pygame.draw.rect(display, (200, 200, 200), outp.socketrect())
+      pygame.draw.line(display, (0, 0, 0), outp.wirepos(), outp.abspos())
+      # change the color if this one is selected or can get connected
+      color = (200, 200, 200)
+      if focus[0] == FOCUSNODEOUTPUT and outp is focus[1]:
+        color = (255, 255, 100)
+      if focus[0] == FOCUSNODEINPUT and outp is closestoutput:
+        color = (150, 150, 255)
+      pygame.draw.rect(display, color, outp.socketrect())
   pygame.display.update()
   clock.tick(60)
