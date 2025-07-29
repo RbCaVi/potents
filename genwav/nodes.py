@@ -141,8 +141,14 @@ clock = pygame.time.Clock()
 
 nodes = [Node(inputs = [NodeInput('the', 'none')]), Node()]
 
-focus = None
-focuscaptured = False
+# focus: [NOFOCUS, None] | [FOCUSDRAGNODE, node] | [FOCUSNODE, node] | [FOCUSNODEINPUT, node, ii] | [FOCUSNODEOUTPUT, node, oi]
+NOFOCUS         = 0
+FOCUSDRAGNODE   = 1
+FOCUSNODE       = 2
+FOCUSNODEINPUT  = 3 # dragging the socket, specifically
+FOCUSNODEOUTPUT = 4 # dragging the socket, specifically
+
+focus = NOFOCUS,
 
 while True:
   for event in pygame.event.get():
@@ -151,27 +157,23 @@ while True:
     if event.type == pygame.MOUSEBUTTONDOWN:
       #print(event)
       if event.button == 1:
-        focusi = None
         for i,node in enumerate(nodes):
           if node.bounds().collidepoint(event.pos):
-            focusi = i
+            focus = FOCUSDRAGNODE, node
         #print(focusi)
-        if focusi is not None:
-          focus = nodes[focusi]
-          focuscaptured = focus.mousepressed(event.pos)
+        if focus[0] == FOCUSDRAGNODE:
+          if focus[1].mousepressed(event.pos):
+            focus = FOCUSNODE, node
         else:
-          focus = None
-          focuscaptured = False
+          focus = NOFOCUS,
     if event.type == pygame.MOUSEMOTION:
-      if focus is not None:
-        if focuscaptured:
-          focus.mousedragged(event.rel)
-        else:
-          #print(focus.pos, event.rel)
-          focus.pos = addpoints(focus.pos, event.rel)
+      if focus[0] == FOCUSNODE:
+        focus.mousedragged(event.rel)
+      if focus[0] == FOCUSDRAGNODE:
+        #print(focus.pos, event.rel)
+        focus[1].pos = addpoints(focus[1].pos, event.rel)
     if event.type == pygame.MOUSEBUTTONUP:
-      focus = None
-      focuscaptured = False
+      focus = NOFOCUS,
   display.fill((255, 255, 255))
   for node in nodes:
     display.blit(node.draw(), node.pos)
