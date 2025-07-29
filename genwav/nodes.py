@@ -144,14 +144,14 @@ clock = pygame.time.Clock()
 
 nodes = [Node(inputs = [NodeInput('the', 'none')]), Node()]
 
-# focus: [NOFOCUS, None] | [FOCUSDRAGNODE, node] | [FOCUSNODE, node] | [FOCUSNODEINPUT, node, ii] | [FOCUSNODEOUTPUT, node, oi]
-NOFOCUS         = 0
-FOCUSDRAGNODE   = 1
-FOCUSNODE       = 2
-FOCUSNODEINPUT  = 3 # dragging the socket, specifically
-FOCUSNODEOUTPUT = 4 # dragging the socket, specifically
+# focus: (NOFOCUS) | (FOCUSDRAGNODE, node) | (FOCUSNODE, node) | (FOCUSNODEINPUT, inp) | (FOCUSNODEOUTPUT, outp)
+NOFOCUS         = 0, # comma to make it a tuple so i don't need a comma everywhere i use it
+FOCUSDRAGNODE   = 1 # dragging the node
+FOCUSNODE       = 2 # probably dragging a slider or something idk
+FOCUSNODEINPUT  = 3 # dragging an input socket
+FOCUSNODEOUTPUT = 4 # dragging an output socket
 
-focus = NOFOCUS,
+focus = NOFOCUS
 
 while True:
   for event in pygame.event.get():
@@ -160,23 +160,28 @@ while True:
     if event.type == pygame.MOUSEBUTTONDOWN:
       #print(event)
       if event.button == 1:
+        focus = NOFOCUS
         for i,node in enumerate(nodes):
           if node.bounds().collidepoint(event.pos):
             focus = FOCUSDRAGNODE, node
+          for inp in node.inputs:
+            if inp.socketrect().collidepoint(event.pos):
+              focus = FOCUSNODEINPUT, inp
         #print(focusi)
         if focus[0] == FOCUSDRAGNODE:
           if focus[1].mousepressed(event.pos):
             focus = FOCUSNODE, node
-        else:
-          focus = NOFOCUS,
     if event.type == pygame.MOUSEMOTION:
       if focus[0] == FOCUSNODE:
         focus.mousedragged(event.rel)
       if focus[0] == FOCUSDRAGNODE:
         #print(focus.pos, event.rel)
         focus[1].pos = addpoints(focus[1].pos, event.rel)
+      if focus[0] == FOCUSNODEINPUT:
+        #print(focus.pos, event.rel)
+        focus[1].pos = addpoints(focus[1].pos, event.rel)
     if event.type == pygame.MOUSEBUTTONUP:
-      focus = NOFOCUS,
+      focus = NOFOCUS
   display.fill((255, 255, 255))
   for node in nodes:
     display.blit(node.draw(), node.pos)
