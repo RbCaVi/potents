@@ -189,26 +189,28 @@ FOCUSNODEOUTPUT = 4 # dragging an output socket
 focus = NOFOCUS
 
 while True:
+  mpos = pygame.mouse.get_pos()
+  nextfocus = NOFOCUS
+  for i,node in enumerate(nodes):
+    if node.bounds().collidepoint(mpos):
+      nextfocus = FOCUSDRAGNODE, node
+    for inp in node.inputs:
+      if inp.socketrect().collidepoint(mpos):
+        nextfocus = FOCUSNODEINPUT, inp
+    for outp in node.outputs:
+      if outp.socketrect().collidepoint(mpos):
+        nextfocus = FOCUSNODEOUTPUT, outp
+  #print(focusi)
+  if focus[0] == FOCUSDRAGNODE:
+    if focus[1].mousepressed(event.pos):
+      nextfocus = FOCUSNODE, node
   for event in pygame.event.get():
     if event.type == pygame.QUIT:
       sys.exit()
     if event.type == pygame.MOUSEBUTTONDOWN:
       #print(event)
       if event.button == 1:
-        focus = NOFOCUS
-        for i,node in enumerate(nodes):
-          if node.bounds().collidepoint(event.pos):
-            focus = FOCUSDRAGNODE, node
-          for inp in node.inputs:
-            if inp.socketrect().collidepoint(event.pos):
-              focus = FOCUSNODEINPUT, inp
-          for outp in node.outputs:
-            if outp.socketrect().collidepoint(event.pos):
-              focus = FOCUSNODEOUTPUT, outp
-        #print(focusi)
-        if focus[0] == FOCUSDRAGNODE:
-          if focus[1].mousepressed(event.pos):
-            focus = FOCUSNODE, node
+        focus = nextfocus
     if event.type == pygame.MOUSEMOTION:
       if focus[0] == FOCUSNODE:
         focus.mousedragged(event.rel)
