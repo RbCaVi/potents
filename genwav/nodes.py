@@ -32,7 +32,7 @@ class NodeInput:
   
   def updatesize(self):
     namesize = font.size(self.name)
-    width = 5 + 2 + namesize[0]
+    width = 4 + 2 + namesize[0]
     height = namesize[1]
     self.size = width, height
   
@@ -40,7 +40,37 @@ class NodeInput:
     display = pygame.surface.Surface(self.size, pygame.SRCALPHA)
     display.fill((0, 0, 0, 0))
     name = font.render(self.name, True, (0, 0, 0))
-    display.blit(name, (5 + 2, 0))
+    display.blit(name, (4 + 2, 0))
+    return display
+
+class NodeOutput:
+  def __init__(self, name, typ):
+    self.pos = (0, 0) # the position of the draggable circle relative to the connection point
+    self.name = name
+    self.typ = typ # i call it `typ` because `type` gives ugly ahh purple keyword formatting
+    self.connected = [] # the inputs this sends to
+    self.updatesize()
+  
+  def abspos(self):
+    return addpoints(self.pos, self.wirepos())
+  
+  def wirepos(self):
+    return addpoints(self.parent.pos, (self.parent.size[0], self.parent.outputheights[self.parenti]))
+  
+  def socketrect(self):
+    return pygame.Rect(addpoints(self.abspos(), (-4, -4)), (8, 8))
+  
+  def updatesize(self):
+    namesize = font.size(self.name)
+    width = namesize[0] + 2 + 4
+    height = namesize[1]
+    self.size = width, height
+  
+  def draw(self):
+    display = pygame.surface.Surface(self.size, pygame.SRCALPHA)
+    display.fill((0, 0, 0, 0))
+    name = font.render(self.name, True, (0, 0, 0))
+    display.blit(name, (0, 0))
     return display
 
 class Node:
@@ -79,7 +109,7 @@ class Node:
     width = max(
       namesize[0],
       # two 0's because max treats a single argument as an iterable
-      max(*(i.size[0] for i in self.inputs), 0, 0) + max(*(o.size[0] for o in self.outputs), 0, 0),
+      max(*(i.size[0] for i in self.inputs), 0, 0) + 5 + max(*(o.size[0] for o in self.outputs), 0, 0),
       *(w.minwidth() for w in self.widgets)
     )
     height = (
@@ -117,6 +147,11 @@ class Node:
       ir = i.draw()
       display.blit(ir, (0, iy))
       iy += i.size[1]
+    oy = name.get_height()
+    for o in self.outputs:
+      or_ = o.draw()
+      display.blit(or_, (self.size[0] - or_.get_width(), oy))
+      oy += o.size[1]
     return display
   
   def bounds(self):
@@ -142,7 +177,7 @@ pygame.init()
 display = pygame.display.set_mode((640, 480), pygame.RESIZABLE)
 clock = pygame.time.Clock()
 
-nodes = [Node(inputs = [NodeInput('the', 'none')]), Node()]
+nodes = [Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]), Node()]
 
 # focus: (NOFOCUS) | (FOCUSDRAGNODE, node) | (FOCUSNODE, node) | (FOCUSNODEINPUT, inp) | (FOCUSNODEOUTPUT, outp)
 NOFOCUS         = 0, # comma to make it a tuple so i don't need a comma everywhere i use it
@@ -167,6 +202,9 @@ while True:
           for inp in node.inputs:
             if inp.socketrect().collidepoint(event.pos):
               focus = FOCUSNODEINPUT, inp
+          for outp in node.outputs:
+            if outp.socketrect().collidepoint(event.pos):
+              focus = FOCUSNODEOUTPUT, outp
         #print(focusi)
         if focus[0] == FOCUSDRAGNODE:
           if focus[1].mousepressed(event.pos):
@@ -180,6 +218,9 @@ while True:
       if focus[0] == FOCUSNODEINPUT:
         #print(focus.pos, event.rel)
         focus[1].pos = addpoints(focus[1].pos, event.rel)
+      if focus[0] == FOCUSNODEOUTPUT:
+        #print(focus.pos, event.rel)
+        focus[1].pos = addpoints(focus[1].pos, event.rel)
     if event.type == pygame.MOUSEBUTTONUP:
       focus = NOFOCUS
   display.fill((255, 255, 255))
@@ -188,5 +229,8 @@ while True:
     for inp in node.inputs:
       pygame.draw.line(display, (0, 0, 0), inp.wirepos(), inp.abspos())
       pygame.draw.rect(display, (200, 200, 200), inp.socketrect())
+    for outp in node.outputs:
+      pygame.draw.line(display, (0, 0, 0), outp.wirepos(), outp.abspos())
+      pygame.draw.rect(display, (200, 200, 200), outp.socketrect())
   pygame.display.update()
   clock.tick(60)
