@@ -111,9 +111,9 @@ class Node:
   # and sliders? maybe like blender - slider or connection
   # inputs and outputs of types
   
-  def __init__(self, pos = None, name = None, inputs = None, outputs = None, widgets = None):
-    self.pos = default(pos, (0, 0))
-    self.name = default(name, "DEFAULT NODE")
+  def __init__(self, name, inputs = None, outputs = None, widgets = None):
+    self.pos = (0, 0)
+    self.name = name
     self.inputs = default(inputs, [])
     for ii,i in enumerate(self.inputs):
       i.parent = self
