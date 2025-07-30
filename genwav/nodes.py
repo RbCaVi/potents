@@ -247,6 +247,7 @@ class Widget:
   
   def captures(self, pos):
     # called to check if this widget would capture a click
+    return False
     return self.bounds().collidepoint(pos)
   
   def mousepressed(self, pos):
