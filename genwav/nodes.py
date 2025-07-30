@@ -46,7 +46,7 @@ class NodeInput:
     return display
   
   def connect(self, other):
-    if other is not None:
+    if other is not None and other.typ == self.typ:
       self.connected = other
       self.connected.connected.append(self)
       self.pos = (0, 0)
@@ -250,7 +250,7 @@ clock = pygame.time.Clock()
 
 nodes = [
   Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]),
-  Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]),
+  Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'jej')]),
   Node(),
 ]
 
@@ -345,7 +345,10 @@ while True:
       if focus[0] == FOCUSNODEINPUT and inp is focus[1]:
         color = (255, 255, 100)
       if focus[0] == FOCUSNODEOUTPUT and inp is closestinput:
-        color = (150, 150, 255)
+        if closestinput.typ == focus[1].typ:
+          color = (150, 150, 255)
+        else:
+          color = (255, 150, 150)
       pygame.draw.rect(display, color, inp.socketrect())
     for outp in node.outputs:
       pygame.draw.line(display, (0, 0, 0), outp.wirepos(), outp.abspos())
@@ -354,7 +357,10 @@ while True:
       if focus[0] == FOCUSNODEOUTPUT and outp is focus[1]:
         color = (255, 255, 100)
       if focus[0] == FOCUSNODEINPUT and outp is closestoutput:
-        color = (150, 150, 255)
+        if closestoutput.typ == focus[1].typ:
+          color = (150, 150, 255)
+        else:
+          color = (255, 150, 150)
       pygame.draw.rect(display, color, outp.socketrect())
   pygame.display.update()
   clock.tick(60)
