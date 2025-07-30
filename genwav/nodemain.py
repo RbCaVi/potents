@@ -124,6 +124,7 @@ while True:
           focus[1].connect(closestoutput)
       if focus[0] == FOCUSNODEOUTPUT:
         if closestinput is not None:
+          closestinput.disconnect()
           closestinput.connect(focus[1])
       focus = NOFOCUS
   display.fill((255, 255, 255))
