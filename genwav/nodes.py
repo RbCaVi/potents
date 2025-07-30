@@ -1,6 +1,7 @@
 import pygame
 import sys
 import math
+import collections
 
 pygame.font.init()
 
@@ -19,7 +20,7 @@ class NodeInput:
     self.name = name
     self.typ = typ # i call it `typ` because `type` gives ugly ahh purple keyword formatting
     self.connected = None
-    self.buffer = []
+    self.buffer = collections.deque()
     self.updatesize()
   
   def abspos(self):
@@ -55,6 +56,16 @@ class NodeInput:
     if self.connected is not None:
       self.connected.connected.remove(self)
       self.connected = None
+  
+  def available(self):
+    return len(self.buffer)
+  
+  def read(self, amount):
+    return [self.buffer.popleft() for _ in range(amount)]
+  
+  def captures(self, pos):
+    # pos is relative to the top left corner
+    return False
 
 class NodeOutput:
   def __init__(self, name, typ):
@@ -85,6 +96,14 @@ class NodeOutput:
     name = font.render(self.name, True, (0, 0, 0))
     display.blit(name, (0, 0))
     return display
+  
+  def push(self, data):
+    for c in self.connected:
+      c.buffer.extend(data)
+  
+  def captures(self, pos):
+    # pos is relative to the top right corner
+    return False
 
 class Node:
   # a node
@@ -165,32 +184,57 @@ class Node:
       or_ = o.draw()
       display.blit(or_, (self.size[0] - or_.get_width(), oy))
       oy += o.size[1]
+    wy = max(iy, oy)
+    for w in self.widgets:
+      wr_ = w.draw()
+      display.blit(wr_, ((self.size[0] - wr_.get_width()) / 2, wy))
+      wy += w.size[1]
     return display
   
   def bounds(self):
     return pygame.Rect(self.pos, self.size)
   
   def captures(self, pos):
-    # called when the node is clicked on
-    # return True means captured by a gui element
-    # meaning it won't get dragged
+    # called to check if this node would capture a click
+    # returning True means it won't get dragged
+    x,y = pos
+    x -= self.pos[0]
+    y -= self.pos[1]
+    namesize = font.size(self.name)
+    iy = namesize[1]
+    for i in self.inputs:
+      if i.captures((x, y - iy)):
+        self.nextfocus = i, (x, y - iy)
+        return True
+      iy += i.size[1]
+    oy = namesize[1]
+    for o in self.outputs:
+      if o.captures((x - self.size[1], y - oy)): # eh whatever the outputs can reference their mouse clicks from the right side
+        self.nextfocus = o, (x - self.size[1], y - oy)
+        return True
+      oy += o.size[1]
+    wy = max(iy, oy)
+    for w in self.widgets:
+      if w.captures((x - self.size[1] / 2, y - wy)): # center :)
+        self.nextfocus = w, (x - self.size[1] / 2, y - wy)
+        return True
+      wy += w.size[1]
     return False
   
   def mousepressed(self, pos):
     # called when the node is clicked on
-    # return True means captured by a gui element
-    # meaning it won't get dragged
-    return False
+    self.focus, pos = self.nextfocus # ignore the given mouse position - it should be the same
+    self.focus.mousepressed(pos)
   
   def mousedragged(self, rel):
     # only called if mousepressed() returned True
     # deals with sliders etc
-    pass
+    self.focus.mousedragged(rel)
   
   def mousereleased(self):
     # only called if mousepressed() returned True
     # deals with sliders etc
-    pass
+    self.focus.mousereleased()
 
 def addpoints(*ps):
   # tm
@@ -285,9 +329,11 @@ while True:
       if focus[0] == FOCUSNODE:
         focus[1].mousereleased()
       if focus[0] == FOCUSNODEINPUT:
-        focus[1].connect(closestoutput)
+        if closestoutput is not None:
+          focus[1].connect(closestoutput)
       if focus[0] == FOCUSNODEOUTPUT:
-        closestinput.connect(focus[1])
+        if closestinput is not None:
+          closestinput.connect(focus[1])
       focus = NOFOCUS
   display.fill((255, 255, 255))
   for node in nodes:
