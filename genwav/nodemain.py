@@ -1,7 +1,38 @@
 import pygame
 import sys
+import math
 
 from nodes import Node, NodeInput, NodeOutput, Widget, addpoints, distance
+
+class SineNode(Node):
+  def __init__(self):
+    super(SineNode, self).__init__(f"sine", outputs = [NodeOutput('Value', 'float')])
+    self.t = 0
+  
+  def update(self):
+    self.outputs[0].push([math.sin(self.t)])
+    self.t += 0.05
+
+class DisplayNode(Node):
+  def __init__(self):
+    super(DisplayNode, self).__init__(f"[float] display", inputs = [NodeInput('Value', 'float')], widgets = [DisplayNode.DisplayWidget()])
+    self.widgets[0].size = (self.size[0], self.widgets[0].size[1])
+  
+  def update(self):
+    self.widgets[0].buffer.extend(self.inputs[0].readall())
+  
+  class DisplayWidget(Widget):
+    def __init__(self):
+      self.size = (0, 50)
+      self.buffer = []
+    
+    def draw(self):
+      display = pygame.surface.Surface(self.size, pygame.SRCALPHA) # per pixel alpha because i want to have rounded corners <3
+      pygame.draw.rect(display, (255, 255, 255), ((5, 5), (self.size[0] - 10, self.size[1] - 10)))
+      values = self.buffer[-(self.size[0] - 10):]
+      values = [0] * (self.size[0] - 10 - len(values)) + values
+      pygame.draw.lines(display, (0, 0, 0), False, [(i + 5, y * 20 + 20 + 5) for i,y in enumerate(values)])
+      return display
 
 pygame.init()
 
@@ -9,9 +40,11 @@ display = pygame.display.set_mode((640, 480), pygame.RESIZABLE)
 clock = pygame.time.Clock()
 
 nodes = [
-  Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]),
-  Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'jej')], widgets = [Widget()]),
-  Node(),
+  #Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]),
+  #Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'jej')], widgets = [Widget()]),
+  #Node(),
+  SineNode(),
+  DisplayNode(),
 ]
 
 # focus: (NOFOCUS) | (FOCUSDRAGNODE, node) | (FOCUSNODE, node) | (FOCUSNODEINPUT, inp) | (FOCUSNODEOUTPUT, outp)
@@ -24,6 +57,8 @@ FOCUSNODEOUTPUT = 4 # dragging an output socket
 focus = NOFOCUS
 
 while True:
+  for node in nodes:
+    node.update()
   mpos = pygame.mouse.get_pos()
   nextfocus = NOFOCUS
   for i,node in enumerate(nodes):
