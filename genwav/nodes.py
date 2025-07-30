@@ -142,12 +142,12 @@ class Node:
       namesize[0],
       # two 0's because max treats a single argument as an iterable
       max(*(i.size[0] for i in self.inputs), 0, 0) + 5 + max(*(o.size[0] for o in self.outputs), 0, 0),
-      *(w.minwidth() for w in self.widgets)
+      *(w.size[0] for w in self.widgets)
     )
     height = (
       namesize[1] +
       max(sum(i.size[1] for i in self.inputs), sum(o.size[1] for o in self.outputs)) +
-      sum(w.height() for w in self.widgets)
+      sum(w.size[1] for w in self.widgets)
     )
     self.size = width, height
   
@@ -198,6 +198,7 @@ class Node:
     x -= self.pos[0]
     y -= self.pos[1]
     namesize = font.size(self.name)
+    self.nextfocus = None
     iy = namesize[1]
     for i in self.inputs:
       if i.captures((x, y - iy)):
@@ -212,26 +213,59 @@ class Node:
       oy += o.size[1]
     wy = max(iy, oy)
     for w in self.widgets:
-      if w.captures((x - self.size[1] / 2, y - wy)): # center :)
-        self.nextfocus = w, (x - self.size[1] / 2, y - wy)
+      if w.captures((x - self.size[0] / 2, y - wy)): # center :)
+        self.nextfocus = w, (x - self.size[0] / 2, y - wy)
         return True
       wy += w.size[1]
     return False
   
   def mousepressed(self, pos):
     # called when the node is clicked on
+    # (only if captures() returned True)
     self.focus, pos = self.nextfocus # ignore the given mouse position - it should be the same
     self.focus.mousepressed(pos)
   
   def mousedragged(self, rel):
-    # only called if mousepressed() returned True
+    # only called if captures() returned True
     # deals with sliders etc
     self.focus.mousedragged(rel)
   
   def mousereleased(self):
-    # only called if mousepressed() returned True
+    # only called if captures() returned True
     # deals with sliders etc
     self.focus.mousereleased()
+
+class Widget:
+  def __init__(self):
+    self.size = font.size('hi im widgets!')
+  
+  def draw(self):
+    display = pygame.surface.Surface(self.size, pygame.SRCALPHA)
+    name = font.render('hi im widgets!', True, (0, 0, 0))
+    display.blit(name, ((self.size[0] - name.get_width()) / 2, 0))
+    return display
+  
+  def captures(self, pos):
+    # called to check if this widget would capture a click
+    return self.bounds().collidepoint(pos)
+  
+  def mousepressed(self, pos):
+    # called when the widget is clicked on
+    # (only if captures() returned True)
+    print('hi im widgets!')
+  
+  def mousedragged(self, rel):
+    # only called if captures() returned True
+    # deals with sliders etc
+    pass
+  
+  def mousereleased(self):
+    # only called if captures() returned True
+    # deals with sliders etc
+    pass
+  
+  def bounds(self):
+    return pygame.Rect((-self.size[0] / 2, 0), self.size)
 
 def addpoints(*ps):
   # tm
@@ -250,7 +284,7 @@ clock = pygame.time.Clock()
 
 nodes = [
   Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'none')]),
-  Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'jej')]),
+  Node(inputs = [NodeInput('the', 'none')], outputs = [NodeOutput('weweweweweweew', 'jej')], widgets = [Widget()]),
   Node(),
 ]
 
@@ -275,25 +309,24 @@ while True:
     for outp in node.outputs:
       if outp.socketrect().collidepoint(mpos):
         nextfocus = FOCUSNODEOUTPUT, outp
-  #print(focusi)
-  if focus[0] == FOCUSDRAGNODE:
-    if focus[1].captures(mpos):
-      nextfocus = FOCUSNODE, node
+  if nextfocus[0] == FOCUSDRAGNODE:
+    if nextfocus[1].captures(mpos):
+      nextfocus = FOCUSNODE, nextfocus[1]
   closestoutput = None
   closestinput = None
-  if focus[0] == FOCUSNODEINPUT:
+  if nextfocus[0] == FOCUSNODEINPUT:
     mindist = 30
     for node in nodes:
-      fpos = focus[1].abspos()
+      fpos = nextfocus[1].abspos()
       for outp in node.outputs:
         dist = distance(outp.abspos(), fpos)
         if dist < mindist:
           mindist = dist
           closestoutput = outp
-  if focus[0] == FOCUSNODEOUTPUT:
+  if nextfocus[0] == FOCUSNODEOUTPUT:
     mindist = 30
     for node in nodes:
-      fpos = focus[1].abspos()
+      fpos = nextfocus[1].abspos()
       for inp in node.inputs:
         dist = distance(inp.abspos(), fpos)
         if dist < mindist:
