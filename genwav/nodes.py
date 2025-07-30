@@ -63,6 +63,9 @@ class NodeInput:
   def read(self, amount):
     return [self.buffer.popleft() for _ in range(amount)]
   
+  def readall(self):
+    return [self.buffer.popleft() for _ in range(self.available())]
+  
   def captures(self, pos):
     # pos is relative to the top left corner
     return False
