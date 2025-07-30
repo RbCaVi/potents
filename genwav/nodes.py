@@ -173,21 +173,18 @@ class Node:
     display = pygame.surface.Surface(self.size, pygame.SRCALPHA) # per pixel alpha because i want to have rounded corners <3
     display.fill((128, 128, 128))
     name = font.render(self.name, True, (0, 0, 0))
-    display.blit(name, ((display.get_width() - name.get_width()) / 2, 0))
+    display.blit(name, ((self.size[0] - name.get_width()) / 2, 0))
     iy = name.get_height()
     for i in self.inputs:
-      ir = i.draw()
-      display.blit(ir, (0, iy))
+      display.blit(i.draw(), (0, iy))
       iy += i.size[1]
     oy = name.get_height()
     for o in self.outputs:
-      or_ = o.draw()
-      display.blit(or_, (self.size[0] - or_.get_width(), oy))
+      display.blit(o.draw(), (self.size[0] - o.size[0], oy))
       oy += o.size[1]
     wy = max(iy, oy)
     for w in self.widgets:
-      wr_ = w.draw()
-      display.blit(wr_, ((self.size[0] - wr_.get_width()) / 2, wy))
+      display.blit(w.draw(), ((self.size[0] - w.size[0]) / 2, wy))
       wy += w.size[1]
     return display
   
