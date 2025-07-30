@@ -29,9 +29,9 @@ class DisplayNode(Node):
     def draw(self):
       display = pygame.surface.Surface(self.size, pygame.SRCALPHA) # per pixel alpha because i want to have rounded corners <3
       pygame.draw.rect(display, (255, 255, 255), ((5, 5), (self.size[0] - 10, self.size[1] - 10)))
-      values = self.buffer[-(self.size[0] - 10):]
-      values = [0] * (self.size[0] - 10 - len(values)) + values
-      pygame.draw.lines(display, (0, 0, 0), False, [(i + 5, y * 20 + 20 + 5) for i,y in enumerate(values)])
+      self.buffer = self.buffer[-(self.size[0] - 10):]
+      self.buffer = [0] * (self.size[0] - 10 - len(self.buffer)) + self.buffer
+      pygame.draw.lines(display, (0, 0, 0), False, [(i + 5, y * 20 + 20 + 5) for i,y in enumerate(self.buffer)])
       return display
 
 pygame.init()
