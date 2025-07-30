@@ -115,13 +115,7 @@ class Node:
     self.pos = (0, 0)
     self.name = name
     self.inputs = default(inputs, [])
-    for ii,i in enumerate(self.inputs):
-      i.parent = self
-      i.parenti = ii
     self.outputs = default(outputs, [])
-    for oi,o in enumerate(self.outputs):
-      o.parent = self
-      o.parenti = oi
     self.widgets = default(widgets, [])
     self.updatesize()
     self.layoutconnections()
@@ -155,6 +149,12 @@ class Node:
     # does this need to exist?
     # maybe not if all connections have the same height?
     # also i'm assuming the connections are centered vertically
+    for ii,i in enumerate(self.inputs):
+      i.parent = self
+      i.parenti = ii
+    for oi,o in enumerate(self.outputs):
+      o.parent = self
+      o.parenti = oi
     namesize = font.size(self.name)
     iy = namesize[1]
     self.inputheights = []
