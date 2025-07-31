@@ -18,7 +18,7 @@ class SineNode(Node):
   
   def update(self):
     self.outputs[0].push([math.sin(self.t)])
-    self.t += 0.05
+    self.t += 0.01 * self.widgets[0].value
   
   class SliderWidget(Widget):
     def __init__(self):
@@ -44,6 +44,21 @@ class SineNode(Node):
       position = remap(self.value, self.low, self.high, self.lowsize[0] + 10, self.size[0] - self.highsize[0] - 10)
       pygame.draw.rect(display, (200, 200, 200), ((position - 3, 2), (6, 16)))
       return display
+    
+    def captures(self, pos):
+      position = remap(self.value, self.low, self.high, self.lowsize[0] + 10, self.size[0] - self.highsize[0] - 10)
+      return pygame.Rect((position - 3 - self.size[0] / 2, 2), (6, 16)).collidepoint(pos)
+    
+    def mousepressed(self, pos):
+      pass
+    
+    def mousedragged(self, rel):
+      position = remap(self.value, self.low, self.high, self.lowsize[0] + 10, self.size[0] - self.highsize[0] - 10)
+      position += rel[0]
+      self.value = remap(position, self.lowsize[0] + 10, self.size[0] - self.highsize[0] - 10, self.low, self.high)
+    
+    def mousereleased(self):
+      pass
 
 class DisplayNode(Node):
   def __init__(self):
