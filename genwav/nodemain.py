@@ -2,16 +2,48 @@ import pygame
 import sys
 import math
 
-from nodes import Node, NodeInput, NodeOutput, Widget, addpoints, distance
+from nodes import Node, NodeInput, NodeOutput, Widget, addpoints, distance, font
+
+def remap(x, low1, high1, low2, high2):
+  frac = (x - low1) / (high1 - low1)
+  return low2 + frac * (high2 - low2)
 
 class SineNode(Node):
   def __init__(self):
-    super(SineNode, self).__init__(f"sine", outputs = [NodeOutput('Value', 'float')])
+    super(SineNode, self).__init__(f"sine", outputs = [NodeOutput('Value', 'float')], widgets = [SineNode.SliderWidget()])
+    self.widgets[0].minwidth = self.size[0]
+    self.widgets[0].updatesize()
+    self.updatesize()
     self.t = 0
   
   def update(self):
     self.outputs[0].push([math.sin(self.t)])
     self.t += 0.05
+  
+  class SliderWidget(Widget):
+    def __init__(self):
+      self.size = (0, 20)
+      self.low = 1
+      self.high = 100
+      self.value = 50
+    
+    def updatesize(self):
+      self.lowsize = font.size(str(self.low))
+      self.highsize = font.size(str(self.high))
+      w = self.lowsize[0] + 10 + 30 + 10 + self.highsize[0]
+      h = max(self.lowsize[1], 20, self.highsize[1])
+      self.size = w, h
+    
+    def draw(self):
+      display = pygame.surface.Surface(self.size, pygame.SRCALPHA)
+      lowtext = font.render(str(self.low), True, (0, 0, 0))
+      hightext = font.render(str(self.high), True, (0, 0, 0))
+      display.blit(lowtext, (0, (self.size[1] - self.lowsize[1]) / 2))
+      display.blit(hightext, (self.size[0] - self.highsize[0], (self.size[1] - self.highsize[1]) / 2))
+      pygame.draw.rect(display, (100, 100, 100), ((self.lowsize[0] + 10, 8), (self.size[0] - self.highsize[0] - 10 - 10 - self.lowsize[0], 4)))
+      position = remap(self.value, self.low, self.high, self.lowsize[0] + 10, self.size[0] - self.highsize[0] - 10)
+      pygame.draw.rect(display, (200, 200, 200), ((position - 3, 2), (6, 16)))
+      return display
 
 class DisplayNode(Node):
   def __init__(self):
@@ -27,7 +59,7 @@ class DisplayNode(Node):
       self.buffer = []
     
     def draw(self):
-      display = pygame.surface.Surface(self.size, pygame.SRCALPHA) # per pixel alpha because i want to have rounded corners <3
+      display = pygame.surface.Surface(self.size, pygame.SRCALPHA)
       pygame.draw.rect(display, (255, 255, 255), ((5, 5), (self.size[0] - 10, self.size[1] - 10)))
       self.buffer = self.buffer[-(self.size[0] - 10):]
       self.buffer = [0] * (self.size[0] - 10 - len(self.buffer)) + self.buffer
