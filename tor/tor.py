@@ -107,6 +107,9 @@ class Cell:
   
   def pack(self, version):
     return pack_cell(self.circid, self.command, self.payload, version)
+  
+  def __repr__(self):
+    return f'Cell({self.circid}, {self.command}, {self.payload})'
 
 def get_context():
   context = ssl.create_default_context()
@@ -118,6 +121,7 @@ torcontext = get_context() # doesn't need to be customizable right?
 
 # get `size` bytes starting from `offset`
 def bytes_from(size, data, offset): # argument order to match struct.unpack_from()
+  assert offset + size <= len(data)
   return data[offset:offset + size]
 
 def unpack_cell(data, version):
@@ -185,17 +189,70 @@ def decode_versions_cell(cell):
   assert cell.command == VERSIONS, 'attempted to decode non-VERSIONS cell using decode_versions_cell()'
   return {v for v, in struct.iter_unpack('>H', cell.payload)}
 
+# certificate types
+#TLS_LINK_X509 = 1 # obsolete
+#RSA_ID_X509 = 2 # obsolete
+#LINK_AUTH_X509 = 3 # obsolete
+IDENTITY_V_SIGNING = 4
+SIGNING_V_TLS_CERT = 5
+#SIGNING_V_LINK_AUTH = 6 # not used right now
+#RSA_ID_V_IDENTITY = 7 # not used right now
+#BLINDED_ID_V_SIGNING = 8 # not used right now
+#HS_IP_V_SIGNING = 9 # not used right now
+#NTOR_CC_IDENTITY = 10 # not used right now
+#HS_IP_CC_SIGNING = 11 # not used right now
+#FAMILY_V_IDENTITY = 12 # not used right now
+
+class EdCert:
+  def __init__(self, cert_type, key_type, key, exts, signature):
+    self.cert_type = cert_type
+    self.key_type = key_type
+    self.key = key
+    self.exts = exts
+    self.signature = signature
+  
+  def __repr__(self):
+    return f'EdCert({self.cert_type}, {self.key_type}, {self.key}, {self.exts}, {self.signature})'
+
+def decode_ed_certificate(cert_data):
+  version,cert_type,expires,key_type,key,n = struct.unpack_from('>BBIB32sB', cert_data)
+  assert version == 1, f'Ed certificate with unrecognized version {version}'
+  assert expires > time.time() / 3600 # `expires` is in hours since the epoch
+  offset = 7 + 32 + 1
+  exts = {}
+  for i in range(n):
+    ext_len,ext_type,ext_flags = struct.unpack_from('>HBB', cert_data, offset)
+    offset += 4
+    ext_data = bytes_from(ext_len, cert_data, offset)
+    offset += ext_len
+    if ext_type == 4:
+      assert ext_len == 32, f'Ed certificate extension of type 4 [signed-with-ed25519-key] has invalid length {ext_len}'
+    else:
+      assert not (ext_flags & 1), f'Ed certificate extension necessary for validation with unrecognized type {ext_type}'
+    assert ext_type not in exts, f'duplicate extension of type {ext_type} in Ed certificate' # do i need to check this?
+    exts[ext_type] = ext_data
+  signature = bytes_from(64, cert_data, offset)
+  offset += 64
+  assert offset == len(cert_data), f'extra data after signature in Ed certificate' # is this something i need to check?
+  return EdCert(cert_type, key_type, key, exts, signature)
+
 def decode_certs_cell(cell):
   assert cell.command == CERTS, 'attempted to decode non-CERTS cell using decode_certs_cell()'
   n, = struct.unpack_from('>B', cell.payload) # number of certificates
   offset = 1
-  certs = []
+  certs = {}
   for i in range(n):
     cert_type,cert_len = struct.unpack_from('>BH', cell.payload, offset)
     offset += 3
     cert_data = bytes_from(cert_len, cell.payload, offset)
     offset += cert_len
-    certs.append((cert_type, cert_data))
+    if cert_type == IDENTITY_V_SIGNING:
+      cert_data = decode_ed_certificate(cert_data)
+    if cert_type == SIGNING_V_TLS_CERT:
+      cert_data = decode_ed_certificate(cert_data)
+    # i'm going to ignore all the other certificates anyway so i don't have to process them
+    assert cert_type not in certs, f'duplicate certificate of type {cert_type} in CERTS cell'
+    certs[cert_type] = cert_data
   return certs
 
 # connects to the relay without authenticating
