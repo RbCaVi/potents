@@ -12,6 +12,8 @@ import ssl
 import time
 import socket
 import struct
+import nacl.signing
+import hashlib
 
 KEY_LEN = 16 # size of stream cipher key in bytes
 KP_ENC_LEN = 128 # length of public key encrypted message in bytes
@@ -42,10 +44,19 @@ FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74
 EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381FFFFFFFFFFFFFFFF
 '''
 
-def tor_hash(data): # sha1 # not called hash because of ugly ahh purple keyword formatting
-  raise NotImplementedError
+# hash functions
+# sha1 sha256 sha3-256
+# sha1 is deprecated and should not be used
 
-# sometimes sha3 and sha3 236 are used?
+def sha1(data):
+  print("SHA1 is deprecated :((((((((((")
+  return hashlib.sha1(data).digest()
+
+def sha256(data):
+  return hashlib.sha256(data).digest()
+
+def sha3_256(data):
+  return hashlib.sha3_256(data).digest()
 
 def hash_pk(pk): # sha1 of der encoding of asn1 rsa key from pkcs1
   raise NotImplementedError
@@ -79,7 +90,7 @@ variable_length_commands = [VERSIONS, VPADDING, CERTS, AUTH_CHALLENGE, AUTHENTIC
 # note: i didn't include AUTHORIZE because it says not used
 
 def pack_fixed_length_cell(circid, command, payload, version):
-  assert len(payload) == FIXED_PAYLOAD_LEN
+  assert len(payload) == FIXED_PAYLOAD_LEN, f'payload of wrong length: {len(payload)}'
   if version < 4:
     return struct.pack('>HB509s', circid, command, payload) # circuit id is 2 bytes for version less than 4
   else:
@@ -121,7 +132,7 @@ torcontext = get_context() # doesn't need to be customizable right?
 
 # get `size` bytes starting from `offset`
 def bytes_from(size, data, offset): # argument order to match struct.unpack_from()
-  assert offset + size <= len(data)
+  assert offset + size <= len(data), 'not enough bytes to return from bytes_from()'
   return data[offset:offset + size]
 
 def unpack_cell(data, version):
@@ -204,20 +215,27 @@ SIGNING_V_TLS_CERT = 5
 #FAMILY_V_IDENTITY = 12 # not used right now
 
 class EdCert:
-  def __init__(self, cert_type, key_type, key, exts, signature):
+  def __init__(self, cert_type, key_type, key, exts, signed, signature):
     self.cert_type = cert_type
     self.key_type = key_type
     self.key = key
     self.exts = exts
+    self.signed = signed
     self.signature = signature
   
   def __repr__(self):
-    return f'EdCert({self.cert_type}, {self.key_type}, {self.key}, {self.exts}, {self.signature})'
+    return f'EdCert({self.cert_type}, {self.key_type}, {self.key}, {self.exts}, {self.signed}, {self.signature})'
+  
+  def verify(self, key): # key is a nacl.signing.VerifyKey
+    return key.verify(self.signed, self.signature)
+
+def ed_key(key_data):
+  return nacl.signing.VerifyKey(key_data, encoder = nacl.encoding.RawEncoder)
 
 def decode_ed_certificate(cert_data):
   version,cert_type,expires,key_type,key,n = struct.unpack_from('>BBIB32sB', cert_data)
   assert version == 1, f'Ed certificate with unrecognized version {version}'
-  assert expires > time.time() / 3600 # `expires` is in hours since the epoch
+  assert expires > time.time() / 3600, f'expired Ed certificate' # `expires` is in hours since the epoch
   offset = 7 + 32 + 1
   exts = {}
   for i in range(n):
@@ -227,14 +245,16 @@ def decode_ed_certificate(cert_data):
     offset += ext_len
     if ext_type == 4:
       assert ext_len == 32, f'Ed certificate extension of type 4 [signed-with-ed25519-key] has invalid length {ext_len}'
+      ext_data = ed_key(ext_data)
     else:
       assert not (ext_flags & 1), f'Ed certificate extension necessary for validation with unrecognized type {ext_type}'
     assert ext_type not in exts, f'duplicate extension of type {ext_type} in Ed certificate' # do i need to check this?
     exts[ext_type] = ext_data
   signature = bytes_from(64, cert_data, offset)
+  signed = cert_data[:offset]
   offset += 64
   assert offset == len(cert_data), f'extra data after signature in Ed certificate' # is this something i need to check?
-  return EdCert(cert_type, key_type, key, exts, signature)
+  return EdCert(cert_type, key_type, key, exts, signed, signature)
 
 def decode_certs_cell(cell):
   assert cell.command == CERTS, 'attempted to decode non-CERTS cell using decode_certs_cell()'
@@ -248,8 +268,10 @@ def decode_certs_cell(cell):
     offset += cert_len
     if cert_type == IDENTITY_V_SIGNING:
       cert_data = decode_ed_certificate(cert_data)
+      assert cert_data.cert_type == cert_type, f'mismatched certificate type [{cert_data.cert_type}] inside Ed certificate of type 4 in CERTS_CELL'
     if cert_type == SIGNING_V_TLS_CERT:
       cert_data = decode_ed_certificate(cert_data)
+      assert cert_data.cert_type == cert_type, f'mismatched certificate type [{cert_data.cert_type}] inside Ed certificate of type 5 in CERTS_CELL'
     # i'm going to ignore all the other certificates anyway so i don't have to process them
     assert cert_type not in certs, f'duplicate certificate of type {cert_type} in CERTS cell'
     certs[cert_type] = cert_data
@@ -269,6 +291,19 @@ def connect(relay):
   
   certs = decode_certs_cell(conn.recv())
   
-  return conn, certs
+  assert certs[IDENTITY_V_SIGNING].key_type == 1, f'incorrect key type {certs[IDENTITY_V_SIGNING].key_type} for IDENTITY_V_SIGNING certificate'
+  KP_relayid_ed = certs[IDENTITY_V_SIGNING].exts[4]
+  assert certs[IDENTITY_V_SIGNING].verify(KP_relayid_ed)
+  KP_relaysign_ed = ed_key(certs[IDENTITY_V_SIGNING].key)
+  
+  assert certs[SIGNING_V_TLS_CERT].key_type in [1, 3], f'incorrect key type {certs[IDENTITY_V_SIGNING].key_type} for SIGNING_V_TLS_CERT certificate' # technically it should be 3, but old tor put 1 for no reason so
+  assert certs[SIGNING_V_TLS_CERT].verify(KP_relaysign_ed)
+  servercert = s.getpeercert(binary_form = True)
+  assert certs[SIGNING_V_TLS_CERT].key == sha256(servercert)
+  
+  challenge = conn.recv()
+  assert challenge.command == AUTH_CHALLENGE
+  
+  return conn, KP_relayid_ed, KP_relaysign_ed # the certificates aren't important right?
 
-conn,certs = connect(('140.78.100.22', 5443))
+conn,KP_relayid_ed,KP_relaysign_ed = connect(('140.78.100.22', 5443))
