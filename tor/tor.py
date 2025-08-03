@@ -17,6 +17,10 @@ import hashlib
 import random
 import requests
 import os
+import itertools
+import base64
+
+import tor_dirs
 
 KEY_LEN = 16 # size of stream cipher key in bytes
 KP_ENC_LEN = 128 # length of public key encrypted message in bytes
@@ -318,8 +322,70 @@ def parse_auth_dir(auth_dir):
     flags.append(parts.pop(0))
   addr = parts.pop(0)
   fingerprint = ''.join(parts)
-  return name, flags, addr, fingerprint
+  # i'm going to ignore the flags
+  # the ones that are handled in the original code are:
+  # hs no-hs bridge no-v2 orport= weight= v3ident= ipv6=
+  # upload= download= vote=
+  return name, addr, fingerprint # also i have no idea how to verify the fingerprint :(
 
-auth_dirs = [parse_auth_dir(d) for d in auth_dirs]
+auth_dirs = [parse_auth_dir(d) for d in tor_dirs.auth_dirs]
+
+os.makedirs('cache', exist_ok = True)
+
+class Peekable:
+  def __init__(self, it):
+    self.it = it
+    self.buffer = []
+  
+  def __iter__(self):
+    return self
+  
+  def __next__(self):
+    if len(self.buffer) == 1:
+      return self.buffer.pop()
+    else:
+      return next(self.it)
+  
+  def peek(self):
+    if len(self.buffer) == 0:
+      self.buffer.append(next(self.it))
+    return self.buffer[0]
+
+# convert a function that returns a generator to one that returns a list
+def generator_to_list(f):
+  return lambda *args, **kwargs: [*f(*args, **kwargs)]
+
+@generator_to_list
+def parse_consensus(consensus):
+  lines = Peekable(line for line in consensus.split('\n') if line != '')
+  for line in lines:
+    # parse line as a KeywordLine - keyword + spaces/tabs + arguments
+    # i'm assuming i get a well formed document so i don't have to check keyword validity
+    # or that whitespace is only spaces and tabs
+    # or that there aren't any embedded null characters
+    keyword,*arguments = line.split()
+    if lines.peek().startswith('-----BEGIN '):
+      line = next(lines)
+      object_name = line[len('-----BEGIN '):-len('-----')]
+      end_line = '-----END ' + object_name + '-----'
+      object_encoded = ''.join(itertools.takewhile(lambda line: line != end_line, lines)) # the last line disappears but that's what i want anyway
+      object_data = base64.b64decode(object_encoded)
+    else:
+      object_name = None
+      object_data = None
+    yield keyword, arguments, object_name, object_data
+
+if not os.path.exists('cache/consensus'):
+  name,addr,fingerprint = random.choice(auth_dirs)
+  print(f'downloading consensus from {name} ({addr})')
+  consensusdata = requests.get(f'http://{addr}/tor/status-vote/current/consensus').text
+  with open('cache/consensus', 'w') as f:
+    f.write(consensusdata)
+else:
+  print('using cached consensus')
+  with open('cache/consensus') as f:
+    consensusdata = f.read()
+
+consensus = parse_consensus(consensusdata)
 
 #conn,KP_relayid_ed,KP_relaysign_ed = connect(('140.78.100.22', 5443))
