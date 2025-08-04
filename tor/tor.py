@@ -19,6 +19,8 @@ import requests
 import os
 import itertools
 import base64
+import datetime
+import pickle
 
 import tor_dirs
 
@@ -334,7 +336,7 @@ os.makedirs('cache', exist_ok = True)
 
 class Peekable:
   def __init__(self, it):
-    self.it = it
+    self.it = iter(it)
     self.buffer = []
   
   def __iter__(self):
@@ -356,8 +358,8 @@ def generator_to_list(f):
   return lambda *args, **kwargs: [*f(*args, **kwargs)]
 
 @generator_to_list
-def parse_consensus(consensus):
-  lines = Peekable(line for line in consensus.split('\n') if line != '')
+def parse_netdoc(netdoc):
+  lines = Peekable(line for line in netdoc.split('\n') if line != '')
   for line in lines:
     # parse line as a KeywordLine - keyword + spaces/tabs + arguments
     # i'm assuming i get a well formed document so i don't have to check keyword validity
@@ -375,17 +377,140 @@ def parse_consensus(consensus):
       object_data = None
     yield keyword, arguments, object_name, object_data
 
-if not os.path.exists('cache/consensus'):
-  name,addr,fingerprint = random.choice(auth_dirs)
-  print(f'downloading consensus from {name} ({addr})')
-  consensusdata = requests.get(f'http://{addr}/tor/status-vote/current/consensus').text
-  with open('cache/consensus', 'w') as f:
-    f.write(consensusdata)
-else:
-  print('using cached consensus')
-  with open('cache/consensus') as f:
-    consensusdata = f.read()
+def get_line_args_optional_no_object(line_type, lines, default = None):
+  # assumes lines is a Peekable
+  # returns the line arguments or None
+  # errors if an object is present
+  if lines.peek()[0] == line_type:
+    line = next(lines)
+    assert line[2] is None, f'line of type {line_type} should not have an object'
+    return line[1]
+  else:
+    return default
 
-consensus = parse_consensus(consensusdata)
+def get_line_args_no_object(line_type, lines):
+  # lines is a Peekable
+  # returns the line arguments
+  # errors if an object is present
+  check_type = lines.peek()[0]
+  assert check_type == line_type, f'missing required line of type {line_type}; got {check_type}'
+  line = next(lines)
+  assert line[2] is None, f'line of type {line_type} should not have an object'
+  return line[1]
+
+# convert a list of 'key=value' strings to a dictionary
+def params_to_dict(params):
+  if params is None:
+    return None
+  split = [kv.split('=') for kv in params]
+  out = {k:v for k,v in split}
+  assert len(out) == len(split), 'duplicate key :('
+  return out
+
+def parse_consensus(consensus_doc):
+  # consensusdoc is a list of lines, as returned by parse_netdoc()
+  # i'm assuming it's in the same order as in the spec at https://spec.torproject.org/dir-spec/consensus-formats.html
+  # also that it doesn't have any extra arguments not mentioned in the spec
+  lines = Peekable(consensus_doc)
+  consensus_version, = get_line_args_no_object('network-status-version', lines)
+  assert consensus_version == '3', f'unrecognized consensus version {consensus_version}'
+  consensus_type, = get_line_args_no_object('vote-status', lines)
+  assert consensus_type == 'consensus', f'unrecognized consensus type {consensus_type}' # the spec says 'vote' or 'status' but the consensus i got has 'consensus'
+  consensus_method, = get_line_args_optional_no_object('consensus-method', lines, [1]) # ignore
+  
+  # these are naive datetime - utc timezone
+  valid_after = datetime.datetime.fromisoformat('T'.join(get_line_args_no_object('valid-after', lines)))
+  fresh_until = datetime.datetime.fromisoformat('T'.join(get_line_args_no_object('fresh-until', lines)))
+  valid_until = datetime.datetime.fromisoformat('T'.join(get_line_args_no_object('valid-until', lines)))
+  
+  # i don't care about these
+  voting_delays = get_line_args_no_object('voting-delay', lines)
+  client_versions = get_line_args_no_object('client-versions', lines)
+  server_versions = get_line_args_no_object('server-versions', lines)
+  
+  known_flags = get_line_args_no_object('known-flags', lines)
+  
+  # i don't care about these
+  # maybe the client ones but i'll deal with that if it's a problem
+  rec_client_protos = params_to_dict(get_line_args_optional_no_object('recommended-client-protocols', lines, []))
+  rec_relay_protos = params_to_dict(get_line_args_optional_no_object('recommended-relay-protocols', lines, []))
+  req_client_protos = params_to_dict(get_line_args_optional_no_object('required-client-protocols', lines, []))
+  req_relay_protos = params_to_dict(get_line_args_optional_no_object('required-relay-protocols', lines, []))
+
+  params = params_to_dict(get_line_args_optional_no_object('params', lines, []))
+  
+  srv_prev_reveals,srv_prev = get_line_args_optional_no_object('shared-rand-previous-value', lines)
+  srv_prev_reveals = int(srv_prev_reveals)
+  srv_prev = base64.b64decode(srv_prev)
+  assert len(srv_prev) == 32, f'shared random value of length {len(srv_prev)} in consensus (should be 32)' # 256 bits or 32 bytes
+  
+  srv_curr_reveals,srv_curr = get_line_args_optional_no_object('shared-rand-current-value', lines)
+  srv_curr_reveals = int(srv_curr_reveals)
+  srv_curr = base64.b64decode(srv_curr)
+  assert len(srv_curr) == 32, f'shared random value of length {len(srv_curr)} in consensus (should be 32)' # 256 bits or 32 bytes
+  
+  # i don't care about this now
+  dirs = []
+  while lines.peek()[0] == 'dir-source':
+    dir_name,dir_fingerprint,dir_hostname,dir_ip,dir_dirport,dir_orport = get_line_args_no_object('dir-source', lines)
+    dir_contact = ' '.join(get_line_args_no_object('contact', lines))
+    vote_digest, = get_line_args_no_object('vote-digest', lines) # don't really care about this
+    dirs.append((dir_name, dir_fingerprint, dir_hostname, dir_ip, dir_dirport, dir_orport, dir_contact))
+  
+  routers = []
+  while lines.peek()[0] == 'r':
+    # i'm ignoring r_descr_digest (digest of most recent descriptor), r_pub1, r_pub2 (publication date, only meaningful in votes)
+    r_name,r_id_hash,r_descr_digest,r_pub1,r_pub2,r_ip,r_orport,r_dirport = get_line_args_no_object('r', lines)
+    r_id_hash = base64.b64decode(r_id_hash + '=') # unpadded :(
+    addrs = [] # ignore
+    while lines.peek()[0] == 'a':
+      r_extra_addr, = get_line_args_no_object('a', lines)
+      addrs.append(r_extra_addr)
+    r_flags = get_line_args_no_object('s', lines)
+    r_version = ' '.join(get_line_args_optional_no_object('v', lines, []))
+    r_protos = params_to_dict(get_line_args_no_object('pr', lines))
+    r_bandwidth = params_to_dict(get_line_args_optional_no_object('w', lines)) # ignore
+    r_ports = get_line_args_optional_no_object('p', lines)
+    routers.append((r_name, r_id_hash, r_ip, r_orport, r_dirport, r_flags, r_version, r_protos, r_ports))
+  
+  () = get_line_args_no_object('directory-footer', lines)
+  bandwidth_weights = params_to_dict(get_line_args_optional_no_object('bandwidth-weights', lines)) # ignore
+  
+  signatures = [] # ignore # i'm not verifying these :)
+  for line in lines:
+    assert line[0] == 'directory-signature'
+    signature_data = line[1]
+    assert line[2] == 'SIGNATURE'
+    if len(signature_data) == 3:
+      hash_alg,id_key,signing_key_digest = signature_data
+    else:
+      hash_alg,id_key,signing_key_digest = 'sha1', *signature_data
+    signatures.append((hash_alg, id_key, signing_key_digest, line[3]))
+  
+  return valid_after, fresh_until, valid_until, known_flags, rec_client_protos, req_client_protos, params, srv_prev, srv_curr, routers
+
+def get_consensus():
+  if not os.path.exists('cache/consensus'):
+    name,addr,fingerprint = random.choice(auth_dirs)
+    print(f'downloading consensus from {name} ({addr})')
+    consensus_data = requests.get(f'http://{addr}/tor/status-vote/current/consensus').text
+    consensus_doc = parse_netdoc(consensus_data)
+    consensus = parse_consensus(consensus_doc)
+    with open('cache/consensus', 'wb') as f:
+      pickle.dump(consensus, f, 0)
+  else:
+    print('using cached consensus')
+    with open('cache/consensus', 'rb') as f:
+      consensus = pickle.load(f)
+    valid_until = consensus[2]
+    if valid_until < datetime.datetime.utcnow():
+      print('cached consensus too old')
+      os.remove('cache/consensus')
+      return get_consensus()
+  return consensus
+
+valid_after,fresh_until,valid_until,known_flags,rec_client_protos,req_client_protos,params,srv_prev,srv_curr,routers = get_consensus()
+
+router = random.choice([r for r in routers if 'Guard' in r[5]])
 
 #conn,KP_relayid_ed,KP_relaysign_ed = connect(('140.78.100.22', 5443))
