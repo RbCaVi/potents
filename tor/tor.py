@@ -330,15 +330,14 @@ def get_consensus():
     print('using cached consensus')
     with open('cache/consensus', 'rb') as f:
       consensus_parsed = pickle.load(f)
-    valid_until = consensus_parsed[2]
-    if valid_until < datetime.datetime.utcnow():
+    if consensus_parsed.valid_until < datetime.datetime.utcnow():
       print('cached consensus too old')
       os.remove('cache/consensus')
       return get_consensus()
   return consensus_parsed
 
-valid_after,fresh_until,valid_until,known_flags,rec_client_protos,req_client_protos,params,srv_prev,srv_curr,routers = get_consensus()
+cons = get_consensus() # i can't call it 'consensus' because it'll collide with the module :(
 
-router = random.choice([r for r in routers if 'Guard' in r[5]])
+router = random.choice([r for r in cons.routers if 'Guard' in r.flags])
 
 #conn,KP_relayid_ed,KP_relaysign_ed = connect(('140.78.100.22', 5443))

@@ -4,6 +4,31 @@ import base64
 import lib
 import netdoc
 
+class Consensus:
+  def __init__(self, valid_after, fresh_until, valid_until, known_flags, rec_client_protos, req_client_protos, params, srv_prev, srv_curr, routers):
+    self.valid_after = valid_after
+    self.fresh_until = fresh_until
+    self.valid_until = valid_until
+    self.known_flags = known_flags
+    self.rec_client_protos = rec_client_protos
+    self.req_client_protos = req_client_protos
+    self.params = params
+    self.srv_prev = srv_prev
+    self.srv_curr = srv_curr
+    self.routers = routers
+
+class Router:
+  def __init__(self, name, id_hash, ip, orport, dirport, flags, version, protos, ports):
+    self.name = name
+    self.id_hash = id_hash
+    self.ip = ip
+    self.orport = orport
+    self.dirport = dirport
+    self.flags = flags
+    self.version = version
+    self.protos = protos
+    self.ports = ports
+
 def parse_consensus(consensus_doc):
   # consensusdoc is a list of lines, as returned by parse_netdoc()
   # i'm assuming it's in the same order as in the spec at https://spec.torproject.org/dir-spec/consensus-formats.html
@@ -68,7 +93,7 @@ def parse_consensus(consensus_doc):
     r_protos = lib.params_to_dict(netdoc.get_line_args_no_object('pr', lines))
     r_bandwidth = lib.params_to_dict(netdoc.get_line_args_optional_no_object('w', lines)) # ignore
     r_ports = netdoc.get_line_args_optional_no_object('p', lines)
-    routers.append((r_name, r_id_hash, r_ip, r_orport, r_dirport, r_flags, r_version, r_protos, r_ports))
+    routers.append(Router(r_name, r_id_hash, r_ip, r_orport, r_dirport, r_flags, r_version, r_protos, r_ports))
   
   () = netdoc.get_line_args_no_object('directory-footer', lines)
   bandwidth_weights = lib.params_to_dict(netdoc.get_line_args_optional_no_object('bandwidth-weights', lines)) # ignore
@@ -84,4 +109,4 @@ def parse_consensus(consensus_doc):
       hash_alg,id_key,signing_key_digest = 'sha1', *signature_data
     signatures.append((hash_alg, id_key, signing_key_digest, line.object_data))
   
-  return valid_after, fresh_until, valid_until, known_flags, rec_client_protos, req_client_protos, params, srv_prev, srv_curr, routers
+  return Consensus(valid_after, fresh_until, valid_until, known_flags, rec_client_protos, req_client_protos, params, srv_prev, srv_curr, routers)
