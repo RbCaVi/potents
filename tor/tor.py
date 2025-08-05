@@ -313,7 +313,7 @@ def connect(relay):
   challenge = conn.recv()
   assert challenge.command == AUTH_CHALLENGE
   
-  return conn, KP_relayid_ed, KP_relaysign_ed # the certificates aren't important right?
+  return conn, KP_relaysign_ed # the certificates aren't important right?
 
 os.makedirs('cache', exist_ok = True)
 
@@ -340,4 +340,4 @@ cons = get_consensus() # i can't call it 'consensus' because it'll collide with 
 
 router = random.choice([r for r in cons.routers if 'Guard' in r.flags])
 
-#conn,KP_relayid_ed,KP_relaysign_ed = connect(('140.78.100.22', 5443))
+#conn,KP_relaysign_ed = connect(('140.78.100.22', 5443))
