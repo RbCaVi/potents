@@ -213,3 +213,20 @@ fallback_dirs = [ # contents of https://gitlab.torproject.org/tpo/core/tor/-/blo
   "TerminaTor ipv6=[2a02:c207:2034:5805::1]:9001 62.171.142.3:9001 A0C59410B9030AC1385C4CA44C8DBFE13AF4BC9B",
   "Cyprus ipv6=[2001:bc8:32d7:276::]:80 62.210.205.228:80 60A211F20E74C7D2D884BA49202964F5C94FA015",
 ]
+
+# from https://gitlab.torproject.org/tpo/core/tor/-/blob/main/src/app/config/config.c#L5593
+def parse_auth_dir(auth_dir):
+  parts = auth_dir.split()
+  name = parts.pop(0) # the original code had a check that the first part is alphanumeric and of an acceptable length but i know the input it's getting
+  flags = []
+  while parts[0][0] not in '0123456789':
+    flags.append(parts.pop(0))
+  addr = parts.pop(0)
+  fingerprint = ''.join(parts)
+  # i'm going to ignore the flags
+  # the ones that are handled in the original code are:
+  # hs no-hs bridge no-v2 orport= weight= v3ident= ipv6=
+  # upload= download= vote=
+  return name, addr, fingerprint # also i have no idea how to verify the fingerprint :(
+
+auth_dirs = [parse_auth_dir(d) for d in auth_dirs]

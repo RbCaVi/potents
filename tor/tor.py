@@ -315,28 +315,11 @@ def connect(relay):
   
   return conn, KP_relayid_ed, KP_relaysign_ed # the certificates aren't important right?
 
-# from https://gitlab.torproject.org/tpo/core/tor/-/blob/main/src/app/config/config.c#L5593
-def parse_auth_dir(auth_dir):
-  parts = auth_dir.split()
-  name = parts.pop(0) # the original code had a check that the first part is alphanumeric and of an acceptable length but i know the input it's getting
-  flags = []
-  while parts[0][0] not in '0123456789':
-    flags.append(parts.pop(0))
-  addr = parts.pop(0)
-  fingerprint = ''.join(parts)
-  # i'm going to ignore the flags
-  # the ones that are handled in the original code are:
-  # hs no-hs bridge no-v2 orport= weight= v3ident= ipv6=
-  # upload= download= vote=
-  return name, addr, fingerprint # also i have no idea how to verify the fingerprint :(
-
-auth_dirs = [parse_auth_dir(d) for d in tor_dirs.auth_dirs]
-
 os.makedirs('cache', exist_ok = True)
 
 def get_consensus():
   if not os.path.exists('cache/consensus'):
-    name,addr,fingerprint = random.choice(auth_dirs)
+    name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
     print(f'downloading consensus from {name} ({addr})')
     consensus_data = requests.get(f'http://{addr}/tor/status-vote/current/consensus').text
     consensus_doc = netdoc.parse_netdoc(consensus_data)
