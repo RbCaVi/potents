@@ -17,17 +17,21 @@ class Consensus:
     self.srv_curr = srv_curr
     self.routers = routers
 
-class Router:
-  def __init__(self, name, id_hash, ip, orport, dirport, flags, version, protos, ports):
+class RouterInfo:
+  def __init__(self, name, id_hash, descr_hash, ip, orport, dirport, flags, version, protos, ports):
     self.name = name
     self.id_hash = id_hash
+    self.descr_hash = descr_hash
     self.ip = ip
-    self.orport = orport
-    self.dirport = dirport
+    self.orport = int(orport) # relay (onion router)
+    self.dirport = int(dirport) # directory cache and hidden service directory
     self.flags = flags
     self.version = version
     self.protos = protos
     self.ports = ports
+  
+  def address(self):
+    return self.ip, self.orport
 
 def parse_consensus(consensus_doc):
   # consensusdoc is a list of lines, as returned by parse_netdoc()
@@ -81,10 +85,11 @@ def parse_consensus(consensus_doc):
   
   routers = []
   while lines.peek().keyword == 'r':
-    # i'm ignoring r_descr_digest (digest of most recent descriptor), r_pub1, r_pub2 (publication date, only meaningful in votes)
-    r_name,r_id_hash,r_descr_digest,r_pub1,r_pub2,r_ip,r_orport,r_dirport = netdoc.get_line_args_no_object('r', lines)
+    # i'm ignoring r_pub1, r_pub2 (publication date, only meaningful in votes)
+    r_name,r_id_hash,r_descr_hash,r_pub1,r_pub2,r_ip,r_orport,r_dirport = netdoc.get_line_args_no_object('r', lines)
     r_id_hash = base64.b64decode(r_id_hash + '=') # unpadded :(
-    addrs = [] # ignore
+    r_descr_hash = base64.b64decode(r_descr_hash + '=') # unpadded :(
+    addrs = [] # ignore # this may have an ipv6 address
     while lines.peek().keyword == 'a':
       r_extra_addr, = netdoc.get_line_args_no_object('a', lines)
       addrs.append(r_extra_addr)
@@ -93,7 +98,7 @@ def parse_consensus(consensus_doc):
     r_protos = lib.params_to_dict(netdoc.get_line_args_no_object('pr', lines))
     r_bandwidth = lib.params_to_dict(netdoc.get_line_args_optional_no_object('w', lines)) # ignore
     r_ports = netdoc.get_line_args_optional_no_object('p', lines)
-    routers.append(Router(r_name, r_id_hash, r_ip, r_orport, r_dirport, r_flags, r_version, r_protos, r_ports))
+    routers.append(RouterInfo(r_name, r_id_hash, r_descr_hash, r_ip, r_orport, r_dirport, r_flags, r_version, r_protos, r_ports))
   
   () = netdoc.get_line_args_no_object('directory-footer', lines)
   bandwidth_weights = lib.params_to_dict(netdoc.get_line_args_optional_no_object('bandwidth-weights', lines)) # ignore
