@@ -315,6 +315,29 @@ def connect(relay):
   
   return conn, KP_relaysign_ed # the certificates aren't important right?
 
+def create_first_hop_ntor(conn, fingerprint, ntor_key_pub):
+  # ntor_key_pub is B
+  # temp_key_pub is X
+  # server_temp_key_pub is Y
+  
+  temp_key_sec = cryptography.hazmat.primitives.asymmetric.x25519.X25519PrivateKey.generate()
+  temp_key_pub = temp_key_sec.public_key()
+  
+  circid = 0x81818181 | secrets.randbits(31) # not sure why i have 0x81818181 - the only thing i need is that the top bit is 1 and the rest are not all 0
+  
+  conn.send(encode_create2_cell_ntor(circid, fingerprint, ntor_key_pub, temp_key_pub))
+  server_temp_key_pub,auth_hashed_server = decode_created2_cell_ntor(conn.recv())
+  
+  secret_input = temp_key_sec.exchange(server_temp_key_pub) + temp_key_sec.exchange(ntor_key_pub) + fingerprint + ntor_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID
+  secret_hashed = tor_hmac(secret_input, NTOR_PROTO_ID + b':verify')
+  auth_input = secret_hashed + fingerprint + ntor_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID
+  assert auth_hashed == tor_hmac(auth_input, NTOR_PROTO_ID + b':mac')
+  
+  key_seed = tor_hmac(secret_input, NTOR_PROTO_ID + b':key_extract')
+  keys = ntor_kdf(key_seed)
+  
+  return keys, circid
+
 os.makedirs('cache', exist_ok = True)
 
 def get_consensus():
@@ -324,6 +347,8 @@ def get_consensus():
     consensus_data = requests.get(f'http://{addr}/tor/status-vote/current/consensus').text
     consensus_doc = netdoc.parse_netdoc(consensus_data)
     consensus_parsed = consensus.parse_consensus(consensus_doc)
+    with open('cache/consensus.txt', 'w') as f:
+      f.write(consensus_data)
     with open('cache/consensus', 'wb') as f:
       pickle.dump(consensus_parsed, f, 0)
   else:
@@ -340,4 +365,11 @@ cons = get_consensus() # i can't call it 'consensus' because it'll collide with 
 
 router = random.choice([r for r in cons.routers if 'Guard' in r.flags])
 
-#conn,KP_relaysign_ed = connect(('140.78.100.22', 5443))
+print(f'connecting to {router.name} at {router.address()}')
+
+conn,KP_relaysign_ed = connect(router.address())
+
+def get_router_descriptor(router):
+  
+
+keys,circid = create_first_hop_ntor(conn, router.id_hash, ntor_key)
