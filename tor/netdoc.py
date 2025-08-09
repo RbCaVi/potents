@@ -24,7 +24,7 @@ def parse_netdoc(netdoc):
       object_name = line[len('-----BEGIN '):-len('-----')]
       end_line = '-----END ' + object_name + '-----'
       object_encoded = ''.join(itertools.takewhile(lambda line: line != end_line, lines)) # the last line disappears but that's what i want anyway
-      object_data = base64.b64decode(object_encoded)
+      object_data = base64.b64decode(object_encoded + '==')
     else:
       object_name = None
       object_data = None
@@ -50,3 +50,24 @@ def get_line_args_no_object(line_type, lines):
   line = next(lines)
   assert line.object_name is None, f'line of type {line_type} should not have an object'
   return line.arguments
+
+def get_line_args_optional_with_object(line_type, object_name, lines, default = None):
+  # assumes lines is a Peekable
+  # returns the line arguments or None
+  # errors if an object is not present
+  if lines.peek().keyword == line_type:
+    line = next(lines)
+    assert line.object_name == object_name, f'line of type {line_type} must have an object named {object_name}'
+    return line.arguments, line.object_data
+  else:
+    return default
+
+def get_line_args_with_object(line_type, object_name, lines):
+  # lines is a Peekable
+  # returns the line arguments
+  # errors if an object is not present
+  check_type = lines.peek().keyword
+  assert check_type == line_type, f'missing required line of type {line_type}; got {check_type}'
+  line = next(lines)
+  assert line.object_name == object_name, f'line of type {line_type} must have an object named {object_name}'
+  return line.arguments, line.object_data
