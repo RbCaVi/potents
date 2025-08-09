@@ -19,10 +19,13 @@ import requests
 import os
 import datetime
 import pickle
+import operator
+import collections
 
 import tor_dirs
 import netdoc
 import consensus
+import lib
 
 KEY_LEN = 16 # size of stream cipher key in bytes
 KP_ENC_LEN = 128 # length of public key encrypted message in bytes
@@ -339,6 +342,7 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub):
   return keys, circid
 
 os.makedirs('cache', exist_ok = True)
+os.makedirs('cache/routers', exist_ok = True)
 
 def get_consensus():
   if not os.path.exists('cache/consensus'):
@@ -371,7 +375,81 @@ print(f'connecting to {router.name} at {router.address()}')
 
 conn,KP_relaysign_ed = connect(router.address())
 
+def assert_one(l):
+  l = [*l]
+  assert len(l) == 1
+  return l[0]
+
+def assert_optional(l, default = None):
+  l = [*l]
+  assert len(l) <= 1
+  if len(l) == 0:
+    return default
+  return l[0]
+
+def assert_nonempty(l):
+  l = [*l]
+  assert len(l) > 0
+  return l
+
+def unwrap_line_args_no_object(line):
+  assert line.object_name is None
+  return line.arguments
+
+def unwrap_line_args_with_object(object_name, line):
+  assert line.object_name == object_name
+  return line.arguments, line.object_data
+
+def unwrap_line_args_with_object_c(object_name): # curried
+  def unwrap_line_args_with_object_b(line): # bound
+    return unwrap_line_args_with_object(object_name, line)
+  return unwrap_line_args_with_object_b
+
+def tobool(x):
+  assert x in ['0', '1']
+  return x == '1'
+
+def parse_router(router_doc):
+  lines = lib.Peekable(router_doc)
+  name,ip,orport,socksport,dirport = netdoc.get_line_args_no_object('router', lines)
+  (),id25519 = netdoc.get_line_args_with_object('identity-ed25519', 'ED25519 CERT', lines)
+  id25519 = decode_ed_certificate(id25519)
+  lines = [*lines]
+  # there is no order requirement for the rest of the file (i think)
+  # so i'm putting all of the lines into a dict
+  grouped_lines = collections.defaultdict(list)
+  for line in lines:
+    grouped_lines[line.keyword].append(line)
+  exitpolicy = [line for line in lines if line.keyword in ['accept', 'reject']]
+  # i can ignore unrecognized keywords right?
+  master25519 = lib.b64decode(unwrap_line_args_no_object(assert_one(grouped_lines['master-key-ed25519']))[0]) # ignore? - already included in `id25519`
+  bandwidth = unwrap_line_args_no_object(assert_one(grouped_lines['bandwidth'])) # ignore
+  platform = lib.optional(unwrap_line_args_no_object)(assert_optional(grouped_lines['platform']))
+  published = ' '.join(unwrap_line_args_no_object(assert_one(grouped_lines['published']))) # ignore
+  fingerprint = lib.optional_chain(unwrap_line_args_no_object, ''.join, bytes.fromhex)(assert_optional(grouped_lines['fingerprint']))
+  hibernating = lib.optional_chain(unwrap_line_args_no_object, operator.itemgetter(0), tobool)(assert_optional(grouped_lines['hibernating']))
+  uptime = lib.optional_chain(unwrap_line_args_no_object, operator.itemgetter(0), int)(assert_optional(grouped_lines['uptime'])) # ignore
+  (),tap_key = lib.optional(unwrap_line_args_with_object_c('RSA PUBLIC KEY'))(assert_optional(grouped_lines['onion-key'])) # ignore - used for obsolete 'tap' handshake
+  (),tap_crosscert = lib.optional(unwrap_line_args_with_object_c('CROSSCERT'))(assert_optional(grouped_lines['onion-key-crosscert'])) # ignore
+  ntor_key = lib.b64decode(unwrap_line_args_no_object(assert_one(grouped_lines['ntor-onion-key']))[0])
+  (),ntor_crosscert = lib.optional(unwrap_line_args_with_object_c('ED25519 CERT'))(assert_optional(grouped_lines['ntor-onion-key-crosscert'])) # ignore i guess?
+  (),signing_key = unwrap_line_args_with_object_c('RSA PUBLIC KEY')(assert_optional(grouped_lines['onion-key'])) # ignore - obsolete
+  ipv6_exit_port_policy = [unwrap_line_args_no_object(l) for l in grouped_lines['ipv6-policy']]
+  overloaded = lib.optional(unwrap_line_args_no_object)(assert_optional(grouped_lines['overload-general'])) # ignore
+
 def get_router_descriptor(router):
-  
+  filename = f'cache/routers/router-{router.name}-{router.ip}-{router.orport}'
+  name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
+  print(f'downloading router descriptor for {router.name} ({router.ip}:{router.orport}) from {name} ({addr})')
+  router_response = requests.get(f'http://{addr}/tor/server/d/{router.descr_hash.hex()}')
+  router_data = router_response.text
+  print(f'response code {router_response.status_code}')
+  with open(filename + '.txt', 'w') as f:
+    f.write(router_data)
+  router_doc = netdoc.parse_netdoc(router_data)
+  router_parsed = parse_router(router_doc)
+  return router_parsed
+
+get_router_descriptor(router)
 
 keys,circid = create_first_hop_ntor(conn, router.id_hash, ntor_key)
