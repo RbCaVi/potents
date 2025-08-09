@@ -344,11 +344,13 @@ def get_consensus():
   if not os.path.exists('cache/consensus'):
     name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
     print(f'downloading consensus from {name} ({addr})')
-    consensus_data = requests.get(f'http://{addr}/tor/status-vote/current/consensus').text
-    consensus_doc = netdoc.parse_netdoc(consensus_data)
-    consensus_parsed = consensus.parse_consensus(consensus_doc)
+    consensus_response = requests.get(f'http://{addr}/tor/status-vote/current/consensus')
+    consensus_data = consensus_response.text
+    print(f'response code {consensus_response.status_code}')
     with open('cache/consensus.txt', 'w') as f:
       f.write(consensus_data)
+    consensus_doc = netdoc.parse_netdoc(consensus_data)
+    consensus_parsed = consensus.parse_consensus(consensus_doc)
     with open('cache/consensus', 'wb') as f:
       pickle.dump(consensus_parsed, f, 0)
   else:
