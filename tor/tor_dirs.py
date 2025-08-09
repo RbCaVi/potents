@@ -11,6 +11,13 @@ auth_dirs = [ # the contents of https://gitlab.torproject.org/tpo/core/tor/-/blo
   "faravahar orport=443 v3ident=70849B868D606BAECFB6128C5E3D782029AA394F 216.218.219.41:80 E3E4 2D35 F801 C9D5 AB23 584E 0025 D56F E2B3 3396",
 ]
 
+# on university wifi:
+# longclaw blocked
+# tor26 not blocked
+# maatuska blocked
+# dizum not blocked
+# dannenberg not blocked
+
 fallback_dirs = [ # contents of https://gitlab.torproject.org/tpo/core/tor/-/blob/main/src/app/config/fallback_dirs.inc - but reformatted - i'm not using these this time either <3
   "Quetzalcoatl ipv6=[2a12:a800:2:1:45:141:215:63]:9100 45.141.215.63:9100 82CE42D04B5BA616E611E4758861C864B2ACFCA8",
   "torfinity ipv6=[2001:41d0:701:1100::6e02]:9001 162.19.252.175:443 1734430C503EE26EC1A3B9EB7C29BF4AC64B922B",
