@@ -21,6 +21,8 @@ import datetime
 import pickle
 import operator
 import collections
+import cryptography.hazmat.primitives.asymmetric.x25519
+import secrets
 
 import tor_dirs
 import netdoc
@@ -473,6 +475,6 @@ def get_router_descriptor(router):
   router_parsed = parse_router(router_doc)
   return router_parsed
 
-get_router_descriptor(router)
+routerinfo = get_router_descriptor(router)
 
-keys,circid = create_first_hop_ntor(conn, router.id_hash, ntor_key)
+keys,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
