@@ -409,6 +409,16 @@ def tobool(x):
   assert x in ['0', '1']
   return x == '1'
 
+class RouterInfo:
+  def __init__(self, exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact):
+    self.exitpolicy = exitpolicy
+    self.platform = platform
+    self.fingerprint = fingerprint
+    self.hibernating = hibernating
+    self.ntor_key = ntor_key
+    self.ipv6_exit_port_policy = ipv6_exit_port_policy
+    self.contact = contact
+
 def parse_router(router_doc):
   lines = lib.Peekable(router_doc)
   name,ip,orport,socksport,dirport = netdoc.get_line_args_no_object('router', lines)
@@ -432,10 +442,23 @@ def parse_router(router_doc):
   (),tap_key = lib.optional(unwrap_line_args_with_object_c('RSA PUBLIC KEY'))(assert_optional(grouped_lines['onion-key'])) # ignore - used for obsolete 'tap' handshake
   (),tap_crosscert = lib.optional(unwrap_line_args_with_object_c('CROSSCERT'))(assert_optional(grouped_lines['onion-key-crosscert'])) # ignore
   ntor_key = lib.b64decode(unwrap_line_args_no_object(assert_one(grouped_lines['ntor-onion-key']))[0])
-  (),ntor_crosscert = lib.optional(unwrap_line_args_with_object_c('ED25519 CERT'))(assert_optional(grouped_lines['ntor-onion-key-crosscert'])) # ignore i guess?
+  bit,ntor_crosscert = lib.optional(unwrap_line_args_with_object_c('ED25519 CERT'))(assert_optional(grouped_lines['ntor-onion-key-crosscert'])) # ignore i guess?
   (),signing_key = unwrap_line_args_with_object_c('RSA PUBLIC KEY')(assert_optional(grouped_lines['onion-key'])) # ignore - obsolete
   ipv6_exit_port_policy = [unwrap_line_args_no_object(l) for l in grouped_lines['ipv6-policy']]
   overloaded = lib.optional(unwrap_line_args_no_object)(assert_optional(grouped_lines['overload-general'])) # ignore
+  contact = lib.optional_chain(unwrap_line_args_no_object, ' '.join)(assert_optional(grouped_lines['contact']))
+  # bridge-distribution-request
+  # family
+  # family-cert
+  # eventdns
+  # extra-info-digest
+  # hidden-service-dir
+  # allow-single-hop-exits
+  # tunnelled-dir-server
+  # router-sig-ed25519
+  # router-signature
+  # (i gave up (i'll do these later if i need them))
+  return RouterInfo(exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact)
 
 def get_router_descriptor(router):
   filename = f'cache/routers/router-{router.name}-{router.ip}-{router.orport}'
