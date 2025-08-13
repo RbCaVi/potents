@@ -19,14 +19,14 @@ import requests
 import os
 import datetime
 import pickle
-import operator
-import collections
 import cryptography.hazmat.primitives.asymmetric.x25519
 import secrets
 
 import tor_dirs
 import netdoc
 import consensus
+import routers
+import certificate
 import lib
 
 KEY_LEN = 16 # size of stream cipher key in bytes
@@ -144,11 +144,6 @@ def get_context():
 
 torcontext = get_context() # doesn't need to be customizable right?
 
-# get `size` bytes starting from `offset`
-def bytes_from(size, data, offset): # argument order to match struct.unpack_from()
-  assert offset + size <= len(data), 'not enough bytes to return from bytes_from()'
-  return data[offset:offset + size]
-
 def unpack_cell(data, version):
   if version < 4:
     if len(data) < 2 + 1: # circuit id + command - i'm going to struct.unpack() it
@@ -161,13 +156,13 @@ def unpack_cell(data, version):
     circuitid,command = struct.unpack_from('>IB', data)
     offset = 4 + 1
   if command in fixed_length_commands:
-    payload = bytes_from(FIXED_PAYLOAD_LEN, data, offset)
+    payload = lib.bytes_from(FIXED_PAYLOAD_LEN, data, offset)
     offset += FIXED_PAYLOAD_LEN
     return Cell(circuitid, command, payload), data[offset:]
   elif command in variable_length_commands:
     payload_len, = struct.unpack_from('>H', data, offset)
     offset += 2
-    payload = bytes_from(payload_len, data, offset)
+    payload = lib.bytes_from(payload_len, data, offset)
     offset += payload_len
     return Cell(circuitid, command, payload), data[offset:]
   else:
@@ -228,48 +223,6 @@ SIGNING_V_TLS_CERT = 5
 #HS_IP_CC_SIGNING = 11 # not used right now
 #FAMILY_V_IDENTITY = 12 # not used right now
 
-class EdCert:
-  def __init__(self, cert_type, key_type, key, exts, signed, signature):
-    self.cert_type = cert_type
-    self.key_type = key_type
-    self.key = key
-    self.exts = exts
-    self.signed = signed
-    self.signature = signature
-  
-  def __repr__(self):
-    return f'EdCert({self.cert_type}, {self.key_type}, {self.key}, {self.exts}, {self.signed}, {self.signature})'
-  
-  def verify(self, key): # key is a nacl.signing.VerifyKey
-    return key.verify(self.signed, self.signature)
-
-def ed_key(key_data):
-  return nacl.signing.VerifyKey(key_data, encoder = nacl.encoding.RawEncoder)
-
-def decode_ed_certificate(cert_data):
-  version,cert_type,expires,key_type,key,n = struct.unpack_from('>BBIB32sB', cert_data)
-  assert version == 1, f'Ed certificate with unrecognized version {version}'
-  assert expires > time.time() / 3600, f'expired Ed certificate' # `expires` is in hours since the epoch
-  offset = 7 + 32 + 1
-  exts = {}
-  for i in range(n):
-    ext_len,ext_type,ext_flags = struct.unpack_from('>HBB', cert_data, offset)
-    offset += 4
-    ext_data = bytes_from(ext_len, cert_data, offset)
-    offset += ext_len
-    if ext_type == 4:
-      assert ext_len == 32, f'Ed certificate extension of type 4 [signed-with-ed25519-key] has invalid length {ext_len}'
-      ext_data = ed_key(ext_data)
-    else:
-      assert not (ext_flags & 1), f'Ed certificate extension necessary for validation with unrecognized type {ext_type}'
-    assert ext_type not in exts, f'duplicate extension of type {ext_type} in Ed certificate' # do i need to check this?
-    exts[ext_type] = ext_data
-  signature = bytes_from(64, cert_data, offset)
-  signed = cert_data[:offset]
-  offset += 64
-  assert offset == len(cert_data), f'extra data after signature in Ed certificate' # is this something i need to check?
-  return EdCert(cert_type, key_type, key, exts, signed, signature)
-
 def decode_certs_cell(cell):
   assert cell.command == CERTS, 'attempted to decode non-CERTS cell using decode_certs_cell()'
   n, = struct.unpack_from('>B', cell.payload) # number of certificates
@@ -278,13 +231,13 @@ def decode_certs_cell(cell):
   for i in range(n):
     cert_type,cert_len = struct.unpack_from('>BH', cell.payload, offset)
     offset += 3
-    cert_data = bytes_from(cert_len, cell.payload, offset)
+    cert_data = lib.bytes_from(cert_len, cell.payload, offset)
     offset += cert_len
     if cert_type == IDENTITY_V_SIGNING:
-      cert_data = decode_ed_certificate(cert_data)
+      cert_data = certificate.decode_ed_certificate(cert_data)
       assert cert_data.cert_type == cert_type, f'mismatched certificate type [{cert_data.cert_type}] inside Ed certificate of type 4 in CERTS_CELL'
     if cert_type == SIGNING_V_TLS_CERT:
-      cert_data = decode_ed_certificate(cert_data)
+      cert_data = certificate.decode_ed_certificate(cert_data)
       assert cert_data.cert_type == cert_type, f'mismatched certificate type [{cert_data.cert_type}] inside Ed certificate of type 5 in CERTS_CELL'
     # i'm going to ignore all the other certificates anyway so i don't have to process them
     assert cert_type not in certs, f'duplicate certificate of type {cert_type} in CERTS cell'
@@ -308,7 +261,7 @@ def connect(relay):
   assert certs[IDENTITY_V_SIGNING].key_type == 1, f'incorrect key type {certs[IDENTITY_V_SIGNING].key_type} for IDENTITY_V_SIGNING certificate'
   KP_relayid_ed = certs[IDENTITY_V_SIGNING].exts[4]
   assert certs[IDENTITY_V_SIGNING].verify(KP_relayid_ed)
-  KP_relaysign_ed = ed_key(certs[IDENTITY_V_SIGNING].key)
+  KP_relaysign_ed = certificate.ed_key(certs[IDENTITY_V_SIGNING].key)
   
   assert certs[SIGNING_V_TLS_CERT].key_type in [1, 3], f'incorrect key type {certs[IDENTITY_V_SIGNING].key_type} for SIGNING_V_TLS_CERT certificate' # technically it should be 3, but old tor put 1 for no reason so
   assert certs[SIGNING_V_TLS_CERT].verify(KP_relaysign_ed)
@@ -377,91 +330,6 @@ print(f'connecting to {router.name} at {router.address()}')
 
 conn,KP_relaysign_ed = connect(router.address())
 
-def assert_one(l):
-  l = [*l]
-  assert len(l) == 1
-  return l[0]
-
-def assert_optional(l, default = None):
-  l = [*l]
-  assert len(l) <= 1
-  if len(l) == 0:
-    return default
-  return l[0]
-
-def assert_nonempty(l):
-  l = [*l]
-  assert len(l) > 0
-  return l
-
-def unwrap_line_args_no_object(line):
-  assert line.object_name is None
-  return line.arguments
-
-def unwrap_line_args_with_object(object_name, line):
-  assert line.object_name == object_name
-  return line.arguments, line.object_data
-
-def unwrap_line_args_with_object_c(object_name): # curried
-  def unwrap_line_args_with_object_b(line): # bound
-    return unwrap_line_args_with_object(object_name, line)
-  return unwrap_line_args_with_object_b
-
-def tobool(x):
-  assert x in ['0', '1']
-  return x == '1'
-
-class RouterInfo:
-  def __init__(self, exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact):
-    self.exitpolicy = exitpolicy
-    self.platform = platform
-    self.fingerprint = fingerprint
-    self.hibernating = hibernating
-    self.ntor_key = ntor_key
-    self.ipv6_exit_port_policy = ipv6_exit_port_policy
-    self.contact = contact
-
-def parse_router(router_doc):
-  lines = lib.Peekable(router_doc)
-  name,ip,orport,socksport,dirport = netdoc.get_line_args_no_object('router', lines)
-  (),id25519 = netdoc.get_line_args_with_object('identity-ed25519', 'ED25519 CERT', lines)
-  id25519 = decode_ed_certificate(id25519)
-  lines = [*lines]
-  # there is no order requirement for the rest of the file (i think)
-  # so i'm putting all of the lines into a dict
-  grouped_lines = collections.defaultdict(list)
-  for line in lines:
-    grouped_lines[line.keyword].append(line)
-  exitpolicy = [line for line in lines if line.keyword in ['accept', 'reject']]
-  # i can ignore unrecognized keywords right?
-  master25519 = lib.b64decode(unwrap_line_args_no_object(assert_one(grouped_lines['master-key-ed25519']))[0]) # ignore? - already included in `id25519`
-  bandwidth = unwrap_line_args_no_object(assert_one(grouped_lines['bandwidth'])) # ignore
-  platform = lib.optional(unwrap_line_args_no_object)(assert_optional(grouped_lines['platform']))
-  published = ' '.join(unwrap_line_args_no_object(assert_one(grouped_lines['published']))) # ignore
-  fingerprint = lib.optional_chain(unwrap_line_args_no_object, ''.join, bytes.fromhex)(assert_optional(grouped_lines['fingerprint']))
-  hibernating = lib.optional_chain(unwrap_line_args_no_object, operator.itemgetter(0), tobool)(assert_optional(grouped_lines['hibernating']))
-  uptime = lib.optional_chain(unwrap_line_args_no_object, operator.itemgetter(0), int)(assert_optional(grouped_lines['uptime'])) # ignore
-  (),tap_key = lib.optional(unwrap_line_args_with_object_c('RSA PUBLIC KEY'))(assert_optional(grouped_lines['onion-key'])) # ignore - used for obsolete 'tap' handshake
-  (),tap_crosscert = lib.optional(unwrap_line_args_with_object_c('CROSSCERT'))(assert_optional(grouped_lines['onion-key-crosscert'])) # ignore
-  ntor_key = lib.b64decode(unwrap_line_args_no_object(assert_one(grouped_lines['ntor-onion-key']))[0])
-  bit,ntor_crosscert = lib.optional(unwrap_line_args_with_object_c('ED25519 CERT'))(assert_optional(grouped_lines['ntor-onion-key-crosscert'])) # ignore i guess?
-  (),signing_key = unwrap_line_args_with_object_c('RSA PUBLIC KEY')(assert_optional(grouped_lines['onion-key'])) # ignore - obsolete
-  ipv6_exit_port_policy = [unwrap_line_args_no_object(l) for l in grouped_lines['ipv6-policy']]
-  overloaded = lib.optional(unwrap_line_args_no_object)(assert_optional(grouped_lines['overload-general'])) # ignore
-  contact = lib.optional_chain(unwrap_line_args_no_object, ' '.join)(assert_optional(grouped_lines['contact']))
-  # bridge-distribution-request
-  # family
-  # family-cert
-  # eventdns
-  # extra-info-digest
-  # hidden-service-dir
-  # allow-single-hop-exits
-  # tunnelled-dir-server
-  # router-sig-ed25519
-  # router-signature
-  # (i gave up (i'll do these later if i need them))
-  return RouterInfo(exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact)
-
 def get_router_descriptor(router):
   filename = f'cache/routers/router-{router.name}-{router.ip}-{router.orport}'
   name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
@@ -472,7 +340,7 @@ def get_router_descriptor(router):
   with open(filename + '.txt', 'w') as f:
     f.write(router_data)
   router_doc = netdoc.parse_netdoc(router_data)
-  router_parsed = parse_router(router_doc)
+  router_parsed = routers.parse_router(router_doc)
   return router_parsed
 
 routerinfo = get_router_descriptor(router)

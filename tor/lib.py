@@ -55,3 +55,46 @@ def optional_chain(*fs):
       x = f(x)
     return x
   return f
+
+# verify the length of a list
+def assert_one(l):
+  l = [*l]
+  assert len(l) == 1
+  return l[0]
+
+def assert_optional(l, default = None):
+  l = [*l]
+  assert len(l) <= 1
+  if len(l) == 0:
+    return default
+  return l[0]
+
+def assert_nonempty(l):
+  l = [*l]
+  assert len(l) > 0
+  return l
+
+# like get_line_*
+# but takes a line instead of taking it from an iterator
+def unwrap_line_args_no_object(line):
+  assert line.object_name is None
+  return line.arguments
+
+def unwrap_line_args_with_object(object_name, line):
+  assert line.object_name == object_name
+  return line.arguments, line.object_data
+
+def unwrap_line_args_with_object_c(object_name): # curried
+  def unwrap_line_args_with_object_b(line): # bound
+    return unwrap_line_args_with_object(object_name, line)
+  return unwrap_line_args_with_object_b
+
+# boolean :)
+def tobool(x):
+  assert x in ['0', '1']
+  return x == '1'
+
+# get `size` bytes starting from `offset`
+def bytes_from(size, data, offset): # argument order to match struct.unpack_from()
+  assert offset + size <= len(data), 'not enough bytes to return from bytes_from()'
+  return data[offset:offset + size]
