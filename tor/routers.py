@@ -53,5 +53,5 @@ def parse_router(router_doc):
   # tunnelled-dir-server
   # router-sig-ed25519
   # router-signature
-  # (i gave up (i'll do these later if i need them))
+  # (i gave up (i'll do these later if i need them)) - https://spec.torproject.org/dir-spec/server-descriptor-format.html
   return RouterInfo(exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact)
