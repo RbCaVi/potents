@@ -12,7 +12,6 @@ import ssl
 import time
 import socket
 import struct
-import nacl.signing
 import hashlib
 import random
 import requests
@@ -21,6 +20,7 @@ import datetime
 import pickle
 import cryptography.hazmat.primitives.asymmetric.x25519
 import secrets
+import hmac
 
 import tor_dirs
 import netdoc
@@ -244,6 +244,39 @@ def decode_certs_cell(cell):
     certs[cert_type] = cert_data
   return certs
 
+def unpack_addr_from(data, offset):
+  # returns an ipv4 or ipv6 address as a string
+  # and the new offset
+  addr_type,addr_len = struct.unpack_from('>BB', data, offset)
+  offset += 2
+  assert (addr_type, addr_len) in [(4, 4), (6, 16)], f'unrecognized atype, alen combination: {addr_type}, {addr_len}'
+  addr_data = lib.bytes_from(addr_len, data, offset)
+  offset += addr_len
+  if addr_type == 4:
+    addr = socket.inet_ntop(socket.AF_INET, addr_data)
+  if addr_type == 6:
+    addr = socket.inet_ntop(socket.AF_INET6, addr_data)
+  return addr, offset
+
+def decode_netinfo_cell(cell):
+  assert cell.command == NETINFO, 'attempted to decode non-NETINFO cell using decode_netinfo_cell()'
+  timestamp, = struct.unpack_from('>I', cell.payload)
+  offset = 4
+  other_addr,offset = unpack_addr_from(cell.payload, offset) # (from the router's perspective)
+  n, = struct.unpack_from('>B', cell.payload, offset) # number of my addresses (from the router's perspective)
+  offset += 1
+  my_addrs = []
+  for i in range(n):
+    my_addr,offset = unpack_addr_from(cell.payload, offset)
+    my_addrs.append(my_addr)
+  return timestamp, other_addr, my_addrs
+
+def encode_netinfo_cell(addr):
+  # https://spec.torproject.org/tor-spec/negotiating-channels.html#NETINFO-cells
+  # taking the recommendations - send 00 00 00 00 timestamp and no addresses
+  # only ipv4 addresses supported
+  return Cell(0, NETINFO, pad_fixed_length_data(struct.pack('>IBB4sB', 0, 4, 4, socket.inet_pton(socket.AF_INET, addr), 0)))
+
 # connects to the relay without authenticating
 # takes a (ip, port) pair
 def connect(relay):
@@ -269,14 +302,69 @@ def connect(relay):
   assert certs[SIGNING_V_TLS_CERT].key == sha256(servercert)
   
   challenge = conn.recv()
-  assert challenge.command == AUTH_CHALLENGE
+  assert challenge.command == AUTH_CHALLENGE, 'did not recieve expected AUTH_CHALLENGE cell while initializing connection'
+  
+  router_timestamp,my_addr,router_addrs = decode_netinfo_cell(conn.recv())
+  
+  my_timestamp = int(time.time())
+  
+  print(my_timestamp, router_timestamp, my_addr, router_addrs)
+  
+  conn.send(encode_netinfo_cell(relay[0]))
   
   return conn, KP_relaysign_ed # the certificates aren't important right?
 
-def create_first_hop_ntor(conn, fingerprint, ntor_key_pub):
+HANDSHAKE_TAP = 0x0000 # obsolete
+# (0x0001 is reserved)
+HANDSHAKE_NTOR = 0x0002
+HANDSHAKE_NTOR3 = 0x0003
+
+def pad_fixed_length_data(data):
+  return data + bytes(FIXED_PAYLOAD_LEN - len(data))
+
+def encode_create2_cell(circid, handshake_type, data):
+  return Cell(circid, CREATE2, pad_fixed_length_data(struct.pack('>HH', handshake_type, len(data)) + data))
+
+def encode_create2_cell_ntor(circid, fingerprint, ntor_key_pub, temp_key_pub):
+  data = fingerprint + ntor_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw()
+  return encode_create2_cell(circid, HANDSHAKE_NTOR, data)
+
+def decode_created2_cell(cell):
+  assert cell.command == CREATED2, 'attempted to decode non-CREATED2 cell using decode_created2_cell()'
+  data_len, = struct.unpack_from('>H', cell.payload)
+  print(cell.payload, data_len)
+  offset = 2
+  data = lib.bytes_from(data_len, cell.payload, offset)
+  return data
+
+def decode_created2_cell_ntor(cell):
+  data = decode_created2_cell(cell)
+  assert len(data) == 64
+  server_temp_key_pub = cryptography.hazmat.primitives.asymmetric.x25519.X25519PublicKey.from_public_bytes(data[0:32])
+  auth_hashed_server = data[32:64]
+  return server_temp_key_pub, auth_hashed_server
+
+NTOR_PROTO_ID = b'ntor-curve25519-sha256-1'
+
+def tor_hmac(message, key):
+  return hmac.digest(key, message, hashlib.sha256)
+
+def ntor_kdf(seed, m_expand, chunks):
+  # https://spec.torproject.org/tor-spec/setting-circuit-keys.html#kdf-rfc5869
+  # also used for ntor-hs handshake - hence the m_expand parameter
+  ks = [] # total key material
+  k = b'' # the chunk at each iteration (used to calculate the next chunk)
+  for i in range(1, chunks + 1): # because they start the counter at 1
+    k = tor_hmac(k + m_expand + bytes([i]), seed)
+    ks.append(k)
+  return b''.join(ks)
+
+def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   # ntor_key_pub is B
   # temp_key_pub is X
   # server_temp_key_pub is Y
+  
+  ntor_key_pub = cryptography.hazmat.primitives.asymmetric.x25519.X25519PublicKey.from_public_bytes(ntor_key_pub_bytes)
   
   temp_key_sec = cryptography.hazmat.primitives.asymmetric.x25519.X25519PrivateKey.generate()
   temp_key_pub = temp_key_sec.public_key()
@@ -288,13 +376,25 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub):
   
   secret_input = temp_key_sec.exchange(server_temp_key_pub) + temp_key_sec.exchange(ntor_key_pub) + fingerprint + ntor_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID
   secret_hashed = tor_hmac(secret_input, NTOR_PROTO_ID + b':verify')
-  auth_input = secret_hashed + fingerprint + ntor_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID
-  assert auth_hashed == tor_hmac(auth_input, NTOR_PROTO_ID + b':mac')
+  auth_input = secret_hashed + fingerprint + ntor_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID + b'Server'
+  assert auth_hashed_server == tor_hmac(auth_input, NTOR_PROTO_ID + b':mac')
   
   key_seed = tor_hmac(secret_input, NTOR_PROTO_ID + b':key_extract')
-  keys = ntor_kdf(key_seed)
+  keys_source = ntor_kdf(key_seed, NTOR_PROTO_ID + b':key_expand', 3) # 3 * SHA1_LEN (20) + 2 * KEY_LEN (16) / H_LENGTH (32) = 3 chunks
   
-  return keys, circid
+  offset = 0
+  digest_forward = lib.bytes_from(20, keys_source, offset)
+  offset += 20
+  digest_backward = lib.bytes_from(20, keys_source, offset)
+  offset += 20
+  key_forward = lib.bytes_from(16, keys_source, offset)
+  offset += 16
+  key_backward = lib.bytes_from(16, keys_source, offset)
+  offset += 16
+  nonce_kh = lib.bytes_from(20, keys_source, offset)
+  offset += 20
+  
+  return digest_forward, digest_backward, key_forward, key_backward, nonce_kh, circid
 
 os.makedirs('cache', exist_ok = True)
 os.makedirs('cache/routers', exist_ok = True)
@@ -345,4 +445,4 @@ def get_router_descriptor(router):
 
 routerinfo = get_router_descriptor(router)
 
-keys,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
+digest_forward,digest_backward,key_forward,key_backward,nonce_kh,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
