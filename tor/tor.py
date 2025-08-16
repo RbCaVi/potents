@@ -21,6 +21,7 @@ import pickle
 import cryptography.hazmat.primitives.asymmetric.x25519
 import secrets
 import hmac
+import Cryptodome.Cipher.AES
 
 import tor_dirs
 import netdoc
@@ -39,9 +40,6 @@ DH_SEC_LEN = 40 # size of a dh private key in bytes
 HASH_LEN = 20 # length of the hash output in bytes
 
 FIXED_PAYLOAD_LEN = 509 # longest payload in bytes
-
-def init_stream_cipher(): # 128 bit AES - stream mode - IV all 0
-  raise NotImplementedError
 
 def pk_encrypt(data, key): # RSA with 128 bit keys and exponent 65537 - oaep mgf1 padding with sha1 digest - label unset - ftp://ftp.rsasecurity.com/pub/pkcs/pkcs-1/pkcs-1v2-1.pdf
   raise NotImplementedError
@@ -135,6 +133,15 @@ class Cell:
   
   def __repr__(self):
     return f'Cell({self.circid}, {self.command}, {self.payload})'
+
+class RelayCell:
+  def __init__(self, streamid, command, payload):
+    self.streamid = streamid
+    self.command = command
+    self.payload = payload
+  
+  def __repr__(self):
+    return f'Cell({self.streamid}, {self.command}, {self.payload})'
 
 def get_context():
   context = ssl.create_default_context()
@@ -446,3 +453,54 @@ def get_router_descriptor(router):
 routerinfo = get_router_descriptor(router)
 
 digest_forward,digest_backward,key_forward,key_backward,nonce_kh,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
+
+def stream_cipher(key): # 128 bit AES - stream mode - IV all 0
+  return Cryptodome.Cipher.AES.new(key, Cryptodome.Cipher.AES.MODE_CTR, nonce = b'\0' * 8)
+
+class RelayState:
+  def __init__(self, digest_forward, digest_backward, key_forward, key_backward, hash_func = hashlib.sha1):
+    self.digest_forward = hash_func(digest_forward)
+    self.digest_backward = hash_func(digest_backward)
+    self.cipher_forward = stream_cipher(key_forward)
+    self.cipher_backward = stream_cipher(key_backward)
+  
+  def update_forward(self, cell):
+    # update this relay's stored digest and the digest field in a cell destined for this relay
+    assert cell.command in [RELAY, RELAY_EARLY], f'passed a non RELAY/RELAY_EARLY cell to RelayState.update_forward()'
+    self.digest_forward.update(cell.payload)
+    cell.payload = cell.payload[0:5] + self.digest_forward.digest()[:4] + cell.payload[9:]
+  
+  def check_backward(self, cell):
+    # check if a cell is from this relay and update this relay's stored digest if it is
+    assert cell.command in [RELAY, RELAY_EARLY], f'passed a non RELAY/RELAY_EARLY cell to RelayState.check_backward()'
+    if cell.payload[1:3] != b'\0\0': # `recognized` field does not pass
+      return False
+    digest_payload = cell.payload[0:5] + b'\0\0\0\0' + cell.payload[9:]
+    digest_backward_temp = self.digest_backward.copy()
+    digest_backward_temp.update(digest_payload)
+    if digest_backward_temp.digest()[:4] != cell.payload[5:9]: # `digest` field does not pass
+      return False
+    self.digest_backward = digest_backward_temp
+    return True
+  
+  def encrypt_forward(self, cell):
+    assert cell.command in [RELAY, RELAY_EARLY], f'passed a non RELAY/RELAY_EARLY cell to RelayState.encrypt_forward()'
+    return Cell(cell.circid, cell.command, self.cipher_forward.encrypt(cell.payload))
+  
+  def decrypt_backward(self, cell):
+    assert cell.command in [RELAY, RELAY_EARLY], f'passed a non RELAY/RELAY_EARLY cell to RelayState.encrypt_forward()'
+    return Cell(cell.circid, cell.command, self.cipher_backward.decrypt(cell.payload))
+
+def encode_relay_cell(circid, command, streamid, cell):
+  assert cell.command in [RELAY, RELAY_EARLY], f'relay cell must have command RELAY or RELAY_EARLY'
+  padding = bytes(FIXED_PAYLOAD_LEN - 11 - len(cell.payload))
+  # the two 0 fields are `recognized` and `digest`
+  return Cell(circid, command, struct.pack('>BHHIH', cell.command, 0, cell.streamid, 0, len(cell.payload)) + cell.payload + padding)
+
+def decode_relay_cell(cell):
+  assert cell.command in [RELAY, RELAY_EARLY], 'attempted to decode non-RELAY/RELAY_EARLY cell using decode_relay_cell()'
+  command,recognized,streamid,digest,length = struct.unpack_from('>BHHIH', cell.payload)
+  # i don't need to check `recognized` or `digest` here - it's already checked by RelayState
+  offset = 11
+  payload = lib.bytes_from(length, cell.payload, offset)
+  return RelayCell(streamid, command, payload)
