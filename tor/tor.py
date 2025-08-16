@@ -466,13 +466,13 @@ class RelayState:
   
   def update_forward(self, cell):
     # update this relay's stored digest and the digest field in a cell destined for this relay
-    assert cell.command in [RELAY, RELAY_EARLY], f'passed a non RELAY/RELAY_EARLY cell to RelayState.update_forward()'
+    assert cell.command in [RELAY, RELAY_EARLY], 'passed a non RELAY/RELAY_EARLY cell to RelayState.update_forward()'
     self.digest_forward.update(cell.payload)
     cell.payload = cell.payload[0:5] + self.digest_forward.digest()[:4] + cell.payload[9:]
   
   def check_backward(self, cell):
     # check if a cell is from this relay and update this relay's stored digest if it is
-    assert cell.command in [RELAY, RELAY_EARLY], f'passed a non RELAY/RELAY_EARLY cell to RelayState.check_backward()'
+    assert cell.command in [RELAY, RELAY_EARLY], 'passed a non RELAY/RELAY_EARLY cell to RelayState.check_backward()'
     if cell.payload[1:3] != b'\0\0': # `recognized` field does not pass
       return False
     digest_payload = cell.payload[0:5] + b'\0\0\0\0' + cell.payload[9:]
@@ -484,15 +484,15 @@ class RelayState:
     return True
   
   def encrypt_forward(self, cell):
-    assert cell.command in [RELAY, RELAY_EARLY], f'passed a non RELAY/RELAY_EARLY cell to RelayState.encrypt_forward()'
+    assert cell.command in [RELAY, RELAY_EARLY], 'passed a non RELAY/RELAY_EARLY cell to RelayState.encrypt_forward()'
     return Cell(cell.circid, cell.command, self.cipher_forward.encrypt(cell.payload))
   
   def decrypt_backward(self, cell):
-    assert cell.command in [RELAY, RELAY_EARLY], f'passed a non RELAY/RELAY_EARLY cell to RelayState.encrypt_forward()'
+    assert cell.command in [RELAY, RELAY_EARLY], 'passed a non RELAY/RELAY_EARLY cell to RelayState.encrypt_forward()'
     return Cell(cell.circid, cell.command, self.cipher_backward.decrypt(cell.payload))
 
-def encode_relay_cell(circid, command, streamid, cell):
-  assert cell.command in [RELAY, RELAY_EARLY], f'relay cell must have command RELAY or RELAY_EARLY'
+def encode_relay_cell(circid, command, cell):
+  assert command in [RELAY, RELAY_EARLY], 'attempted to encode non-RELAY/RELAY_EARLY cell using encode_relay_cell()'
   padding = bytes(FIXED_PAYLOAD_LEN - 11 - len(cell.payload))
   # the two 0 fields are `recognized` and `digest`
   return Cell(circid, command, struct.pack('>BHHIH', cell.command, 0, cell.streamid, 0, len(cell.payload)) + cell.payload + padding)
@@ -504,3 +504,33 @@ def decode_relay_cell(cell):
   offset = 11
   payload = lib.bytes_from(length, cell.payload, offset)
   return RelayCell(streamid, command, payload)
+
+class RelayChain:
+  def __init__(self, relays):
+    self.relays = relays
+  
+  def encrypt_forward(self, cell, i = None):
+    # takes an already encoded RELAY/RELAY_EARLY cell
+    # and encrypts it to send
+    # use like conn.send(chain.encrypt_forward(cell))
+    if i is None:
+      i = len(self.relays) - 1
+    self.relays[i].update_forward(cell)
+    for relay in reversed(self.relays):
+      cell = relay.encrypt_forward(cell)
+    return cell
+    
+  
+  def decrypt_backward(self, cell):
+    # cell is the RELAY/RELAY_EARLY cell straight from conn.recv()
+    # use like chain.decrypt_backward(conn.recv())
+    for i,relay in enumerate(self.relays):
+      cell = relay.decrypt_backward(cell)
+      if relay.check_backward(cell):
+        return i, cell
+    assert False, 'undecryptable cell :('
+
+  def decrypt_backward_from_end(self, cell):
+    # make sure the cell comes from the end
+    i,cell = self.decrypt_backward()
+    assert i == len(self.relays) - 1, 'attempted to decrypt a cell that didn\'t come from the end with RelayState.decrypt_backward_from_end()'
