@@ -448,15 +448,24 @@ routerinfo = get_router_descriptor(router)
 
 digest_forward,digest_backward,key_forward,key_backward,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
 
-def stream_cipher(key): # 128 bit AES - stream mode - IV all 0
-  return Cryptodome.Cipher.AES.new(key, Cryptodome.Cipher.AES.MODE_CTR, nonce = b'\0' * 8)
+class StreamCipher: # 128 bit AES - stream mode - IV all 0
+  def __init__(self, key):
+    cipher = cryptography.hazmat.primitives.ciphers.Cipher(cryptography.hazmat.primitives.ciphers.algorithms.AES(key), cryptography.hazmat.primitives.ciphers.modes.CTR(b'\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0'))
+    encryptor = cipher.encryptor
+    decryptor = cipher.decryptor
+  
+  def encrypt(self, data):
+    return self.encryptor.update(data)
+  
+  def decrypt(self, data):
+    return self.decryptor.update(data)
 
 class RelayState:
   def __init__(self, digest_forward, digest_backward, key_forward, key_backward, hash_func = hashlib.sha1):
     self.digest_forward = hash_func(digest_forward)
     self.digest_backward = hash_func(digest_backward)
-    self.cipher_forward = stream_cipher(key_forward)
-    self.cipher_backward = stream_cipher(key_backward)
+    self.cipher_forward = StreamCipher(key_forward)
+    self.cipher_backward = StreamCipher(key_backward)
   
   def update_forward(self, cell):
     # update this relay's stored digest and the digest field in a cell destined for this relay
