@@ -395,7 +395,7 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   key_backward = lib.bytes_from(16, keys_source, offset)
   offset += 16
   
-  return digest_forward, digest_backward, key_forward, key_backward, nonce_kh, circid
+  return digest_forward, digest_backward, key_forward, key_backward, circid
 
 os.makedirs('cache', exist_ok = True)
 os.makedirs('cache/routers', exist_ok = True)
@@ -446,7 +446,7 @@ def get_router_descriptor(router):
 
 routerinfo = get_router_descriptor(router)
 
-digest_forward,digest_backward,key_forward,key_backward,nonce_kh,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
+digest_forward,digest_backward,key_forward,key_backward,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
 
 def stream_cipher(key): # 128 bit AES - stream mode - IV all 0
   return Cryptodome.Cipher.AES.new(key, Cryptodome.Cipher.AES.MODE_CTR, nonce = b'\0' * 8)
