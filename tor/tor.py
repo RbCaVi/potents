@@ -387,7 +387,7 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   assert auth_hashed_server == tor_hmac(auth_input, NTOR_PROTO_ID + b':mac')
   
   key_seed = tor_hmac(secret_input, NTOR_PROTO_ID + b':key_extract')
-  keys_source = ntor_kdf(key_seed, NTOR_PROTO_ID + b':key_expand', 3) # 3 * SHA1_LEN (20) + 2 * KEY_LEN (16) / H_LENGTH (32) = 3 chunks
+  keys_source = ntor_kdf(key_seed, NTOR_PROTO_ID + b':key_expand', 3) # 2 * SHA1_LEN (20) + 2 * KEY_LEN (16) / H_LENGTH (32) = 3 chunks
   
   offset = 0
   digest_forward = lib.bytes_from(20, keys_source, offset)
@@ -398,8 +398,6 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   offset += 16
   key_backward = lib.bytes_from(16, keys_source, offset)
   offset += 16
-  nonce_kh = lib.bytes_from(20, keys_source, offset)
-  offset += 20
   
   return digest_forward, digest_backward, key_forward, key_backward, nonce_kh, circid
 
