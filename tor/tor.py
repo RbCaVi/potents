@@ -329,23 +329,20 @@ HANDSHAKE_NTOR3 = 0x0003
 def pad_fixed_length_data(data):
   return data + bytes(FIXED_PAYLOAD_LEN - len(data))
 
+def encode_ntor_handshake(fingerprint, ntor_key_pub, temp_key_pub):
+  return fingerprint + ntor_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw()
+
 def encode_create2_cell(circid, handshake_type, data):
   return Cell(circid, CREATE2, pad_fixed_length_data(struct.pack('>HH', handshake_type, len(data)) + data))
-
-def encode_create2_cell_ntor(circid, fingerprint, ntor_key_pub, temp_key_pub):
-  data = fingerprint + ntor_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw()
-  return encode_create2_cell(circid, HANDSHAKE_NTOR, data)
 
 def decode_created2_cell(cell):
   assert cell.command == CREATED2, 'attempted to decode non-CREATED2 cell using decode_created2_cell()'
   data_len, = struct.unpack_from('>H', cell.payload)
-  print(cell.payload, data_len)
   offset = 2
   data = lib.bytes_from(data_len, cell.payload, offset)
   return data
 
-def decode_created2_cell_ntor(cell):
-  data = decode_created2_cell(cell)
+def decode_ntor_response(data):
   assert len(data) == 64
   server_temp_key_pub = cryptography.hazmat.primitives.asymmetric.x25519.X25519PublicKey.from_public_bytes(data[0:32])
   auth_hashed_server = data[32:64]
@@ -378,8 +375,8 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   
   circid = 0x81818181 | secrets.randbits(31) # not sure why i have 0x81818181 - the only thing i need is that the top bit is 1 and the rest are not all 0
   
-  conn.send(encode_create2_cell_ntor(circid, fingerprint, ntor_key_pub, temp_key_pub))
-  server_temp_key_pub,auth_hashed_server = decode_created2_cell_ntor(conn.recv())
+  conn.send(encode_create2_cell(circid, HANDSHAKE_NTOR, encode_ntor_handshake(fingerprint, ntor_key_pub, temp_key_pub)))
+  server_temp_key_pub,auth_hashed_server = decode_ntor_response(decode_created2_cell(conn.recv()))
   
   secret_input = temp_key_sec.exchange(server_temp_key_pub) + temp_key_sec.exchange(ntor_key_pub) + fingerprint + ntor_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID
   secret_hashed = tor_hmac(secret_input, NTOR_PROTO_ID + b':verify')
