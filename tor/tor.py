@@ -21,7 +21,6 @@ import pickle
 import cryptography.hazmat.primitives.asymmetric.x25519
 import secrets
 import hmac
-import Cryptodome.Cipher.AES
 
 import tor_dirs
 import netdoc
