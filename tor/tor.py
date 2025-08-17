@@ -362,92 +362,6 @@ def ntor_kdf(seed, m_expand, chunks):
     ks.append(k)
   return b''.join(ks)
 
-def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
-  # ntor_key_pub is B
-  # temp_key_pub is X
-  # server_temp_key_pub is Y
-  
-  ntor_key_pub = cryptography.hazmat.primitives.asymmetric.x25519.X25519PublicKey.from_public_bytes(ntor_key_pub_bytes)
-  
-  temp_key_sec = cryptography.hazmat.primitives.asymmetric.x25519.X25519PrivateKey.generate()
-  temp_key_pub = temp_key_sec.public_key()
-  
-  circid = 0x81818181 | secrets.randbits(31) # not sure why i have 0x81818181 - the only thing i need is that the top bit is 1 and the rest are not all 0
-  
-  conn.send(encode_create2_cell(circid, HANDSHAKE_NTOR, encode_ntor_handshake(fingerprint, ntor_key_pub, temp_key_pub)))
-  server_temp_key_pub,auth_hashed_server = decode_ntor_response(decode_created2_cell(conn.recv()))
-  
-  secret_input = temp_key_sec.exchange(server_temp_key_pub) + temp_key_sec.exchange(ntor_key_pub) + fingerprint + ntor_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID
-  secret_hashed = tor_hmac(secret_input, NTOR_PROTO_ID + b':verify')
-  auth_input = secret_hashed + fingerprint + ntor_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID + b'Server'
-  assert auth_hashed_server == tor_hmac(auth_input, NTOR_PROTO_ID + b':mac')
-  
-  key_seed = tor_hmac(secret_input, NTOR_PROTO_ID + b':key_extract')
-  keys_source = ntor_kdf(key_seed, NTOR_PROTO_ID + b':key_expand', 3) # 2 * SHA1_LEN (20) + 2 * KEY_LEN (16) / H_LENGTH (32) = 3 chunks
-  
-  offset = 0
-  digest_forward = lib.bytes_from(20, keys_source, offset)
-  offset += 20
-  digest_backward = lib.bytes_from(20, keys_source, offset)
-  offset += 20
-  key_forward = lib.bytes_from(16, keys_source, offset)
-  offset += 16
-  key_backward = lib.bytes_from(16, keys_source, offset)
-  offset += 16
-  
-  return digest_forward, digest_backward, key_forward, key_backward, circid
-
-os.makedirs('cache', exist_ok = True)
-os.makedirs('cache/routers', exist_ok = True)
-
-def get_consensus():
-  if not os.path.exists('cache/consensus'):
-    name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
-    print(f'downloading consensus from {name} ({addr})')
-    consensus_response = requests.get(f'http://{addr}/tor/status-vote/current/consensus')
-    consensus_data = consensus_response.text
-    print(f'response code {consensus_response.status_code}')
-    with open('cache/consensus.txt', 'w') as f:
-      f.write(consensus_data)
-    consensus_doc = netdoc.parse_netdoc(consensus_data)
-    consensus_parsed = consensus.parse_consensus(consensus_doc)
-    with open('cache/consensus', 'wb') as f:
-      pickle.dump(consensus_parsed, f, 0)
-  else:
-    print('using cached consensus')
-    with open('cache/consensus', 'rb') as f:
-      consensus_parsed = pickle.load(f)
-    if consensus_parsed.valid_until < datetime.datetime.utcnow():
-      print('cached consensus too old')
-      os.remove('cache/consensus')
-      return get_consensus()
-  return consensus_parsed
-
-cons = get_consensus() # i can't call it 'consensus' because it'll collide with the module :(
-
-router = random.choice([r for r in cons.routers if 'Guard' in r.flags])
-
-print(f'connecting to {router.name} at {router.address()}')
-
-conn,KP_relaysign_ed = connect(router.address())
-
-def get_router_descriptor(router):
-  filename = f'cache/routers/router-{router.name}-{router.ip}-{router.orport}'
-  name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
-  print(f'downloading router descriptor for {router.name} ({router.ip}:{router.orport}) from {name} ({addr})')
-  router_response = requests.get(f'http://{addr}/tor/server/d/{router.descr_hash.hex()}')
-  router_data = router_response.text
-  print(f'response code {router_response.status_code}')
-  with open(filename + '.txt', 'w') as f:
-    f.write(router_data)
-  router_doc = netdoc.parse_netdoc(router_data)
-  router_parsed = routers.parse_router(router_doc)
-  return router_parsed
-
-routerinfo = get_router_descriptor(router)
-
-digest_forward,digest_backward,key_forward,key_backward,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
-
 class StreamCipher: # 128 bit AES - stream mode - IV all 0
   def __init__(self, key):
     cipher = cryptography.hazmat.primitives.ciphers.Cipher(cryptography.hazmat.primitives.ciphers.algorithms.AES(key), cryptography.hazmat.primitives.ciphers.modes.CTR(b'\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0'))
@@ -537,3 +451,89 @@ class RelayChain:
     # make sure the cell comes from the end
     i,cell = self.decrypt_backward()
     assert i == len(self.relays) - 1, 'attempted to decrypt a cell that didn\'t come from the end with RelayState.decrypt_backward_from_end()'
+
+def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
+  # ntor_key_pub is B
+  # temp_key_pub is X
+  # server_temp_key_pub is Y
+  
+  ntor_key_pub = cryptography.hazmat.primitives.asymmetric.x25519.X25519PublicKey.from_public_bytes(ntor_key_pub_bytes)
+  
+  temp_key_sec = cryptography.hazmat.primitives.asymmetric.x25519.X25519PrivateKey.generate()
+  temp_key_pub = temp_key_sec.public_key()
+  
+  circid = 0x81818181 | secrets.randbits(31) # not sure why i have 0x81818181 - the only thing i need is that the top bit is 1 and the rest are not all 0
+  
+  conn.send(encode_create2_cell(circid, HANDSHAKE_NTOR, encode_ntor_handshake(fingerprint, ntor_key_pub, temp_key_pub)))
+  server_temp_key_pub,auth_hashed_server = decode_ntor_response(decode_created2_cell(conn.recv()))
+  
+  secret_input = temp_key_sec.exchange(server_temp_key_pub) + temp_key_sec.exchange(ntor_key_pub) + fingerprint + ntor_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID
+  secret_hashed = tor_hmac(secret_input, NTOR_PROTO_ID + b':verify')
+  auth_input = secret_hashed + fingerprint + ntor_key_pub.public_bytes_raw() + server_temp_key_pub.public_bytes_raw() + temp_key_pub.public_bytes_raw() + NTOR_PROTO_ID + b'Server'
+  assert auth_hashed_server == tor_hmac(auth_input, NTOR_PROTO_ID + b':mac')
+  
+  key_seed = tor_hmac(secret_input, NTOR_PROTO_ID + b':key_extract')
+  keys_source = ntor_kdf(key_seed, NTOR_PROTO_ID + b':key_expand', 3) # 2 * SHA1_LEN (20) + 2 * KEY_LEN (16) / H_LENGTH (32) = 3 chunks
+  
+  offset = 0
+  digest_forward = lib.bytes_from(20, keys_source, offset)
+  offset += 20
+  digest_backward = lib.bytes_from(20, keys_source, offset)
+  offset += 20
+  key_forward = lib.bytes_from(16, keys_source, offset)
+  offset += 16
+  key_backward = lib.bytes_from(16, keys_source, offset)
+  offset += 16
+  
+  return RelayState(digest_forward, digest_backward, key_forward, key_backward), circid
+
+os.makedirs('cache', exist_ok = True)
+os.makedirs('cache/routers', exist_ok = True)
+
+def get_consensus():
+  if not os.path.exists('cache/consensus'):
+    name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
+    print(f'downloading consensus from {name} ({addr})')
+    consensus_response = requests.get(f'http://{addr}/tor/status-vote/current/consensus')
+    consensus_data = consensus_response.text
+    print(f'response code {consensus_response.status_code}')
+    with open('cache/consensus.txt', 'w') as f:
+      f.write(consensus_data)
+    consensus_doc = netdoc.parse_netdoc(consensus_data)
+    consensus_parsed = consensus.parse_consensus(consensus_doc)
+    with open('cache/consensus', 'wb') as f:
+      pickle.dump(consensus_parsed, f, 0)
+  else:
+    print('using cached consensus')
+    with open('cache/consensus', 'rb') as f:
+      consensus_parsed = pickle.load(f)
+    if consensus_parsed.valid_until < datetime.datetime.utcnow():
+      print('cached consensus too old')
+      os.remove('cache/consensus')
+      return get_consensus()
+  return consensus_parsed
+
+cons = get_consensus() # i can't call it 'consensus' because it'll collide with the module :(
+
+router = random.choice([r for r in cons.routers if 'Guard' in r.flags])
+
+print(f'connecting to {router.name} at {router.address()}')
+
+conn,KP_relaysign_ed = connect(router.address())
+
+def get_router_descriptor(router):
+  filename = f'cache/routers/router-{router.name}-{router.ip}-{router.orport}'
+  name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
+  print(f'downloading router descriptor for {router.name} ({router.ip}:{router.orport}) from {name} ({addr})')
+  router_response = requests.get(f'http://{addr}/tor/server/d/{router.descr_hash.hex()}')
+  router_data = router_response.text
+  print(f'response code {router_response.status_code}')
+  with open(filename + '.txt', 'w') as f:
+    f.write(router_data)
+  router_doc = netdoc.parse_netdoc(router_data)
+  router_parsed = routers.parse_router(router_doc)
+  return router_parsed
+
+routerinfo = get_router_descriptor(router)
+
+router_state_1,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
