@@ -501,6 +501,18 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   
   return RelayChain([relay_state]), circid
 
+def create_next_hop_ntor(conn, relays, circid, addr, port, fingerprint, ntor_key_pub_bytes):
+  data,handshake = handshake_ntor_1(fingerprint, ntor_key_pub_bytes)
+  
+  conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY_EARLY, encode_extend2_cell(HANDSHAKE_NTOR, addr, port, fingerprint, handshake))))
+  response = decode_extended2_cell(decode_relay_cell(relays.decrypt_backward_from_end(conn.recv())))
+  
+  relay_state = handshake_ntor_2(data, response)
+  
+  relays.relays.append(relay_state)
+  
+  return relays
+
 os.makedirs('cache', exist_ok = True)
 os.makedirs('cache/routers', exist_ok = True)
 
