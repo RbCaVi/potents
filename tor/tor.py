@@ -501,10 +501,10 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   
   return RelayChain([relay_state]), circid
 
-def create_next_hop_ntor(conn, relays, circid, addr, port, fingerprint, ntor_key_pub_bytes):
+def create_next_hop_ntor(conn, relays, circid, address, fingerprint, ntor_key_pub_bytes):
   data,handshake = handshake_ntor_1(fingerprint, ntor_key_pub_bytes)
   
-  conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY_EARLY, encode_extend2_cell(HANDSHAKE_NTOR, addr, port, fingerprint, handshake))))
+  conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY_EARLY, encode_extend2_cell(HANDSHAKE_NTOR, address, fingerprint, handshake))))
   response = decode_extended2_cell(decode_relay_cell(relays.decrypt_backward_from_end(conn.recv())))
   
   relay_state = handshake_ntor_2(data, response)
@@ -539,14 +539,6 @@ def get_consensus():
       return get_consensus()
   return consensus_parsed
 
-cons = get_consensus() # i can't call it 'consensus' because it'll collide with the module :(
-
-router = random.choice([r for r in cons.routers if 'Guard' in r.flags])
-
-print(f'connecting to {router.name} at {router.address()}')
-
-conn,KP_relaysign_ed = connect(router.address())
-
 def get_router_descriptor(router):
   filename = f'cache/routers/router-{router.name}-{router.ip}-{router.orport}'
   name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
@@ -560,6 +552,25 @@ def get_router_descriptor(router):
   router_parsed = routers.parse_router(router_doc)
   return router_parsed
 
-routerinfo = get_router_descriptor(router)
+cons = get_consensus() # i can't call it 'consensus' because it'll collide with the module :(
 
-relays,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
+router1 = random.choice([r for r in cons.routers if 'Guard' in r.flags])
+router2 = random.choice([r for r in cons.routers])
+router3 = random.choice([r for r in cons.routers if 'Exit' in r.flags])
+
+path_routers = [router1, router2, router3]
+
+print('routers:')
+for router in path_routers:
+  print(f'  {router.name} at {router.address()}')
+
+conn,KP_relaysign_ed = connect(router1.address())
+
+routerinfo1 = get_router_descriptor(router1)
+relays,circid = create_first_hop_ntor(conn, router1.id_hash, routerinfo1.ntor_key)
+
+routerinfo2 = get_router_descriptor(router2)
+relays = create_next_hop_ntor(conn, relays, circid, router2.address(), router2.id_hash, routerinfo2.ntor_key)
+
+routerinfo3 = get_router_descriptor(router3)
+relays = create_next_hop_ntor(conn, relays, circid, router3.address(), router3.id_hash, routerinfo3.ntor_key)
