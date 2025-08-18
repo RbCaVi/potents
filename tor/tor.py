@@ -499,7 +499,7 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   
   relay_state = handshake_ntor_2(data, response)
   
-  return relay_state, circid
+  return RelayChain([relay_state]), circid
 
 os.makedirs('cache', exist_ok = True)
 os.makedirs('cache/routers', exist_ok = True)
@@ -550,4 +550,4 @@ def get_router_descriptor(router):
 
 routerinfo = get_router_descriptor(router)
 
-router_state_1,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
+relays,circid = create_first_hop_ntor(conn, router.id_hash, routerinfo.ntor_key)
