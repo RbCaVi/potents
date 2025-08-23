@@ -508,11 +508,58 @@ def create_first_hop_ntor(conn, fingerprint, ntor_key_pub_bytes):
   
   return RelayChain([relay_state]), circid
 
+BEGIN = 1 # Open a stream
+DATA = 2 # Transmit data
+END = 3 # Close a stream
+CONNECTED = 4 # Stream has successfully opened
+SENDME = 5 # Acknowledge traffic
+EXTEND = 6 # Extend a circuit with TAP (obsolete)
+EXTENDED = 7 # Finish extending a circuit with TAP (obsolete)
+TRUNCATE = 8 # Remove nodes from a circuit (unused)
+TRUNCATED = 9 # Report circuit truncation (unused)
+DROP = 10 # Long-range padding
+RESOLVE = 11 # Hostname lookup
+RESOLVED = 12 # Hostname lookup reply
+BEGIN_DIR = 13 # Open stream to directory cache
+EXTEND2 = 14 # Extend a circuit
+EXTENDED2 = 15 # Finish extending a circuit
+# 16-18 are reserved
+CONFLUX_LINK = 19 # Link circuits into a bundle
+CONFLUX_LINKED = 20 # Acknowledge link request
+CONFLUX_LINKED_ACK = 21 # Acknowledge CONFLUX_LINKED message (for timing)
+CONFLUX_SWITCH = 22 # Switch between circuits in a bundle
+ESTABLISH_INTRO = 32 # Create introduction point
+ESTABLISH_RENDEZVOUS = 33 # Create rendezvous point
+INTRODUCE1 = 34 # Introduction request (to intro point)
+INTRODUCE2 = 35 # Introduction request (to service)
+RENDEZVOUS1 = 36 # Rendezvous request (to rendezvous point)
+RENDEZVOUS2 = 37 # Rendezvous request (to client)
+INTRO_ESTABLISHED = 38 # Acknowledge ESTABLISH_INTRO
+RENDEZVOUS_ESTABLISHED = 39 # Acknowledge ESTABLISH_RENDEZVOUS
+INTRODUCE_ACK = 40 # Acknowledge INTRODUCE1
+PADDING_NEGOTIATE = 41 # Negotiate circuit padding
+PADDING_NEGOTIATED = 42 # Negotiate circuit padding
+XOFF = 43 # Stream-level flow control
+XON = 44 # Stream-level flow control
+
+def encode_relay_extend2_cell(handshake_type, address, fingerprint, data):
+  # address should be a tuple of (ip, port)
+  # using the tap identity key fingerprint because i already have that
+  # the ed25519 key would have to be extracted from the router document (which i have, though)
+  return RelayCell(0, EXTEND2, struct.pack('>BBB4sHBB20sHH', 2, 0, 6, socket.inet_pton(socket.AF_INET, address[0]), address[1], 2, 20, fingerprint, handshake_type, len(data)) + data)
+
+def decode_relay_extended2_cell(cell):
+  assert cell.command == EXTENDED2, 'attempted to decode non-EXTENDED2 cell using decode_extended2_cell()'
+  data_len, = struct.unpack_from('>H', cell.payload)
+  offset = 2
+  data = lib.bytes_from(data_len, cell.payload, offset)
+  return data
+
 def create_next_hop_ntor(conn, relays, circid, address, fingerprint, ntor_key_pub_bytes):
   data,handshake = handshake_ntor_1(fingerprint, ntor_key_pub_bytes)
   
-  conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY_EARLY, encode_extend2_cell(HANDSHAKE_NTOR, address, fingerprint, handshake))))
-  response = decode_extended2_cell(decode_relay_cell(relays.decrypt_backward_from_end(conn.recv())))
+  conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY_EARLY, encode_relay_extend2_cell(HANDSHAKE_NTOR, address, fingerprint, handshake))))
+  response = decode_relay_extended2_cell(decode_relay_cell(relays.decrypt_backward_from_end(conn.recv())))
   
   relay_state = handshake_ntor_2(data, response)
   
