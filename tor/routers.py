@@ -6,7 +6,8 @@ import netdoc
 import certificate
 
 class RouterInfo:
-  def __init__(self, exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact):
+  def __init__(self, id25519, exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact):
+    self.id25519 = id25519
     self.exitpolicy = exitpolicy
     self.platform = platform
     self.fingerprint = fingerprint
@@ -54,4 +55,4 @@ def parse_router(router_doc):
   # router-sig-ed25519
   # router-signature
   # (i gave up (i'll do these later if i need them)) - https://spec.torproject.org/dir-spec/server-descriptor-format.html
-  return RouterInfo(exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact)
+  return RouterInfo(id25519, exitpolicy, platform, fingerprint, hibernating, ntor_key, ipv6_exit_port_policy, contact)
