@@ -62,14 +62,33 @@ curr_time = calendar.timegm(consensus.valid_after.timetuple())
 period,period_length = getperiod(curr_time, 1440), 1440
 
 pub_key = parse_onion(addr)
-get_blinded_key(pub_key, period, period_length)
+blinded_key = get_blinded_key(pub_key, period, period_length)
+
+hs_dirs = [r for r in consensus.routers if 'HSDir' in r.flags]
+
+hs_replicas = 2 # number of separate ranges the descriptor is uploaded to (hsdir_n_replicas)
+hs_spread = 3 # length of each range (hsdir_spread_fetch because i'm not uploading any)
+
+hs_range_starts = [tor.sha3_256(b'store-at-idx' + blinded_key + struct.pack('>QQQ', i, period_length, period)) for i in range(1, hs_replicas + 1)]
+hs_dir_indices = [tor.sha3_256(b'node-idx' + bytes(tor.get_router_descriptor(r).id25519.exts[4]) + consensus.srv_curr + struct.pack('>QQ', period, period_length)) for r in hs_dirs]
+
+selected_hs_dirs = []
+
+for start in hs_range_starts:
+  index = bisect.bisect(hs_dir_indices, start) + 1
+  for i in range(hs_spread):
+    while hs_dirs[index] in selected_hs_dirs:
+      index += 1
+    selected_hs_dirs.append(hs_dirs[index])
+
+print(selected_hs_dirs)
 
 import sys
 sys.exit()
 
-router1 = random.choice([r for r in cons.routers if 'Guard' in r.flags])
-router2 = random.choice([r for r in cons.routers])
-router3 = random.choice([r for r in cons.routers if 'Exit' in r.flags])
+router1 = random.choice([r for r in consensus.routers if 'Guard' in r.flags])
+router2 = random.choice([r for r in consensus.routers])
+router3 = random.choice([r for r in consensus.routers if 'Exit' in r.flags])
 
 path_routers = [router1, router2, router3]
 
