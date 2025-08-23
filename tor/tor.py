@@ -371,8 +371,8 @@ def ntor_kdf(seed, m_expand, chunks):
 class StreamCipher: # 128 bit AES - stream mode - IV all 0
   def __init__(self, key):
     cipher = cryptography.hazmat.primitives.ciphers.Cipher(cryptography.hazmat.primitives.ciphers.algorithms.AES(key), cryptography.hazmat.primitives.ciphers.modes.CTR(b'\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0'))
-    encryptor = cipher.encryptor
-    decryptor = cipher.decryptor
+    self.encryptor = cipher.encryptor()
+    self.decryptor = cipher.decryptor()
   
   def encrypt(self, data):
     return self.encryptor.update(data)
@@ -416,7 +416,7 @@ class RelayState:
 
 def encode_relay_cell(circid, command, cell):
   assert command in [RELAY, RELAY_EARLY], 'attempted to encode non-RELAY/RELAY_EARLY cell using encode_relay_cell()'
-  padding = bytes(FIXED_PAYLOAD_LEN - 11 - len(cell.payload))
+  padding = bytes(FIXED_PAYLOAD_LEN - 11 - len(cell.payload)) # this should be at least partially random but i was lazy to do that
   # the two 0 fields are `recognized` and `digest`
   return Cell(circid, command, struct.pack('>BHHIH', cell.command, 0, cell.streamid, 0, len(cell.payload)) + cell.payload + padding)
 
@@ -455,8 +455,9 @@ class RelayChain:
 
   def decrypt_backward_from_end(self, cell):
     # make sure the cell comes from the end
-    i,cell = self.decrypt_backward()
+    i,cell = self.decrypt_backward(cell)
     assert i == len(self.relays) - 1, 'attempted to decrypt a cell that didn\'t come from the end with RelayState.decrypt_backward_from_end()'
+    return cell
 
 # two halves because this is used in CREATE2 and RELAY_EARLY(EXTEND2) cells
 
