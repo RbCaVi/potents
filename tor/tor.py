@@ -324,7 +324,7 @@ def connect(relay):
   
   conn.send(encode_netinfo_cell(relay[0]))
   
-  return conn, KP_relaysign_ed # the certificates aren't important right?
+  return conn
 
 HANDSHAKE_TAP = 0x0000 # obsolete
 # (0x0001 is reserved)
@@ -629,7 +629,7 @@ print('routers:')
 for router in path_routers:
   print(f'  {router.name} at {router.address()}')
 
-conn,KP_relaysign_ed = connect(router1.address())
+conn = connect(router1.address())
 
 routerinfo1 = get_router_descriptor(router1)
 relays,circid = create_first_hop_ntor(conn, router1.id_hash, routerinfo1.ntor_key)
