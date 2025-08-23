@@ -617,6 +617,26 @@ def get_router_descriptor(router):
   router_parsed = routers.parse_router(router_doc)
   return router_parsed
 
+class Circuit:
+  def __init__(self, routers):
+    self.conn = connect(routers[0].address())
+    router_info = get_router_descriptor(routers[0])
+    self.relays,self.circid = create_first_hop_ntor(self.conn, routers[0].id_hash, router_info.ntor_key)
+    for router in routers[1:]:
+      router_info = get_router_descriptor(router)
+      self.relays = create_next_hop_ntor(self.conn, self.relays, self.circid, router.address(), router.id_hash, router_info.ntor_key)
+  
+  def send(self, cell, cell_type = RELAY): # a RelayCell
+    # cell_type should be RELAY or RELAY_EARLY
+    self.conn.send(self.relays.encrypt_forward(encode_relay_cell(self.circid, cell_type, cell)))
+  
+  def recv(self): # a RelayCell
+    return decode_relay_cell(self.relays.decrypt_backward_from_end(self.conn.recv()))
+  
+  def destroy(self):
+    # DESTROY cell with NONE (0x00) reason
+    self.conn.send(Cell(self.circid, DESTROY, pad_fixed_length_data(b'\x00')))
+
 cons = get_consensus() # i can't call it 'consensus' because it'll collide with the module :(
 
 router1 = random.choice([r for r in cons.routers if 'Guard' in r.flags])
@@ -629,23 +649,13 @@ print('routers:')
 for router in path_routers:
   print(f'  {router.name} at {router.address()}')
 
-conn = connect(router1.address())
-
-routerinfo1 = get_router_descriptor(router1)
-relays,circid = create_first_hop_ntor(conn, router1.id_hash, routerinfo1.ntor_key)
-
-routerinfo2 = get_router_descriptor(router2)
-relays = create_next_hop_ntor(conn, relays, circid, router2.address(), router2.id_hash, routerinfo2.ntor_key)
-
-routerinfo3 = get_router_descriptor(router3)
-relays = create_next_hop_ntor(conn, relays, circid, router3.address(), router3.id_hash, routerinfo3.ntor_key)
-
+circuit = Circuit(path_routers)
 
 streamid = secrets.randbits(16)
 
-conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY, encode_relay_begin_cell(streamid, 'www.example.com:80'))))
+circuit.send(encode_relay_begin_cell(streamid, 'www.example.com:80'))
 
-resp = decode_relay_cell(relays.decrypt_backward_from_end(conn.recv()))
+resp = circuit.recv()
 
 if resp.command == CONNECTED:
   addr,ttl = decode_relay_connected_cell(resp)
@@ -655,12 +665,12 @@ else:
 
 assert resp.command == CONNECTED
 
-conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY, encode_relay_data_cell(streamid, b'GET / HTTP/1.1\r\nHost: www.example.com\r\n\r\n'))))
+circuit.send(encode_relay_data_cell(streamid, b'GET / HTTP/1.1\r\nHost: www.example.com\r\n\r\n'))
 
 recieved = b''
 
 while True:
-  cell = decode_relay_cell(relays.decrypt_backward_from_end(conn.recv()))
+  cell = circuit.recv()
   if cell.command == END:
     break
   elif cell.command == DATA:
@@ -678,5 +688,4 @@ while True:
 print(headers)
 print(body.decode('utf-8'))
 
-# DESTROY cell with NONE (0x00) reason
-conn.send(Cell(circid, DESTROY, pad_fixed_length_data(b'\x00')))
+circuit.destroy()
