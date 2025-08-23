@@ -162,12 +162,18 @@ def unpack_cell(data, version):
     circuitid,command = struct.unpack_from('>IB', data)
     offset = 4 + 1
   if command in fixed_length_commands:
+    if len(data) < offset + FIXED_PAYLOAD_LEN:
+      return None, data
     payload = lib.bytes_from(FIXED_PAYLOAD_LEN, data, offset)
     offset += FIXED_PAYLOAD_LEN
     return Cell(circuitid, command, payload), data[offset:]
   elif command in variable_length_commands:
+    if len(data) < offset + 2:
+      return None, data
     payload_len, = struct.unpack_from('>H', data, offset)
     offset += 2
+    if len(data) < offset + payload_len:
+      return None, data
     payload = lib.bytes_from(payload_len, data, offset)
     offset += payload_len
     return Cell(circuitid, command, payload), data[offset:]
