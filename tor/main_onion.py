@@ -1,6 +1,11 @@
 import secrets
 import random
 import base64
+import calendar
+import time
+import struct
+import cryptography
+import nacl
 
 import tor
 import certificate
@@ -27,14 +32,40 @@ def parse_onion(onion_addr):
   offset += 1
   assert version == b'\x03', 'unrecognized version'
   assert checksum == tor.sha3_256(b'.onion checksum' + pubkey + version)[:2], 'incorrect checksum'
-  return certificate.ed_key(pubkey)
+  return cryptography.hazmat.primitives.asymmetric.x25519.X25519PublicKey.from_public_bytes(pubkey)
 
-print(parse_onion(addr))
+base_point = ( # i did not realize that this was the literal string
+  b'(15112221349535400772501151409588531511454012693041857206046113283949847762202, '
+  b'46316835694926478169428394003475163141307993866256225615783033603165251855960)'
+)
+
+def get_blinded_key(pub_key, period, period_length):
+  # there is technically a secret between the public key and the base point,
+  # but it's not used in original tor
+  blinding_factor = tor.sha3_256(b'Derive temporary signing key\x00' + pub_key.public_bytes_raw() + base_point + b'key-blind' + struct.pack('>QQ', period, period_length))
+  blinding_factor_key = cryptography.hazmat.primitives.asymmetric.x25519.X25519PrivateKey.from_private_bytes(blinding_factor)
+  # not sure which of these is the correct one
+  key1 = nacl.bindings.crypto_scalarmult_ed25519(blinding_factor, pub_key.public_bytes_raw())
+  key2 = blinding_factor_key.exchange(pub_key)
+  return key1 # try key2 as well if key1 doesn't work
+
+def getperiod(curr_time, period_length):
+  minutes = (curr_time + 1) // 60
+  minutes -= 12 * 60 # 30 minute voting interval? * 12
+  period = minutes // period_length
+  return int(period)
+
+consensus = tor.get_consensus()
+
+curr_time = calendar.timegm(consensus.valid_after.timetuple())
+
+period,period_length = getperiod(curr_time, 1440), 1440
+
+pub_key = parse_onion(addr)
+get_blinded_key(pub_key, period, period_length)
 
 import sys
 sys.exit()
-
-cons = tor.get_consensus() # i can't call it 'consensus' because it'll collide with the module :(
 
 router1 = random.choice([r for r in cons.routers if 'Guard' in r.flags])
 router2 = random.choice([r for r in cons.routers])
