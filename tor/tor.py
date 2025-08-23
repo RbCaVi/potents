@@ -30,47 +30,16 @@ import certificate
 import lib
 
 KEY_LEN = 16 # size of stream cipher key in bytes
-KP_ENC_LEN = 128 # length of public key encrypted message in bytes
-KP_PAD_LEN = 42 # bytes of padding added before encryption - you can only encrypt `KP_ENC_LEN - KP_PAD_LEN` bytes at a time
-
-DH_LEN = 128 # size of a member of the diffie hellman group - in bytes
-DH_SEC_LEN = 40 # size of a dh private key in bytes
 
 HASH_LEN = 20 # length of the hash output in bytes
 
 FIXED_PAYLOAD_LEN = 509 # longest payload in bytes
-
-def pk_encrypt(data, key): # RSA with 128 bit keys and exponent 65537 - oaep mgf1 padding with sha1 digest - label unset - ftp://ftp.rsasecurity.com/pub/pkcs/pkcs-1/pkcs-1v2-1.pdf
-  raise NotImplementedError
-
-# curve25519 group and ed25519 signature
-
-# diffie hellman generator is 2
-# this is the modulus p (from rfc2409 section 6.2)
-# you should use a 320 bit dh key - never reused
-'''
-FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74
-020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1437
-4FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED
-EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE65381FFFFFFFFFFFFFFFF
-'''
-
-# hash functions
-# sha1 sha256 sha3-256
-# sha1 is deprecated and should not be used
-
-def sha1(data):
-  print("SHA1 is deprecated :((((((((((")
-  return hashlib.sha1(data).digest()
 
 def sha256(data):
   return hashlib.sha256(data).digest()
 
 def sha3_256(data):
   return hashlib.sha3_256(data).digest()
-
-def hash_pk(pk): # sha1 of der encoding of asn1 rsa key from pkcs1
-  raise NotImplementedError
 
 # skipping the 1.1 keys and names section for now
 
