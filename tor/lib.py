@@ -95,6 +95,6 @@ def tobool(x):
   return x == '1'
 
 # get `size` bytes starting from `offset`
-def bytes_from(size, data, offset): # argument order to match struct.unpack_from()
+def bytes_from(size, data, offset = 0): # argument order to match struct.unpack_from()
   assert offset + size <= len(data), 'not enough bytes to return from bytes_from()'
   return data[offset:offset + size]
