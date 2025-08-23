@@ -567,6 +567,17 @@ def create_next_hop_ntor(conn, relays, circid, address, fingerprint, ntor_key_pu
   
   return relays
 
+def encode_relay_begin_cell(streamid, addrport):
+  # i'm not going to set flags ;)
+  return RelayCell(streamid, BEGIN, bytes(addrport, 'utf-8') + b'\0')
+
+def encode_relay_data_cell(streamid, payload):
+  return RelayCell(streamid, DATA, payload)
+
+def decode_relay_connected_cell(cell):
+  addrbytes,ttl = struct.unpack('>4sI', cell.payload)
+  return socket.inet_ntop(socket.AF_INET, addrbytes), ttl
+
 os.makedirs('cache', exist_ok = True)
 os.makedirs('cache/routers', exist_ok = True)
 
@@ -628,3 +639,44 @@ relays = create_next_hop_ntor(conn, relays, circid, router2.address(), router2.i
 
 routerinfo3 = get_router_descriptor(router3)
 relays = create_next_hop_ntor(conn, relays, circid, router3.address(), router3.id_hash, routerinfo3.ntor_key)
+
+
+streamid = secrets.randbits(16)
+
+conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY, encode_relay_begin_cell(streamid, 'www.example.com:80'))))
+
+resp = decode_relay_cell(relays.decrypt_backward_from_end(conn.recv()))
+
+if resp.command == CONNECTED:
+  addr,ttl = decode_relay_connected_cell(resp)
+  print(addr, ttl)
+else:
+  print(resp)
+
+assert resp.command == CONNECTED
+
+conn.send(relays.encrypt_forward(encode_relay_cell(circid, RELAY, encode_relay_data_cell(streamid, b'GET / HTTP/1.1\r\nHost: www.example.com\r\n\r\n'))))
+
+recieved = b''
+
+while True:
+  cell = decode_relay_cell(relays.decrypt_backward_from_end(conn.recv()))
+  if cell.command == END:
+    break
+  elif cell.command == DATA:
+    recieved += cell.payload
+    print(recieved.decode('utf-8'))
+    if b'\r\n\r\n' in recieved:
+      header,body = recieved.split(b'\r\n\r\n', 1)
+      respline,*headerlines = header.split(b'\r\n')
+      headers = {field.lower():value.strip() for field,value in [l.split(b':', 1) for l in headerlines]}
+      if b'content-length' in headers and len(body) >= int(headers[b'content-length']):
+        break
+  else:
+    print(cell)
+
+print(headers)
+print(body.decode('utf-8'))
+
+# DESTROY cell with NONE (0x00) reason
+conn.send(Cell(circid, DESTROY, pad_fixed_length_data(b'\x00')))
