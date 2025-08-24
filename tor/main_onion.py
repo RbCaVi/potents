@@ -6,19 +6,11 @@ import time
 import struct
 import cryptography
 import nacl
+import bisect
 
 import tor
 import certificate
 import lib
-
-# test addresses
-# l5satjgud6gucryazcyvyvhuxhr74u6ygigiuyixe3a6ysis67ororad.onion
-# pg6mmjiyjmcrsslvykfwnntlaru7p5svn6y2ymmju6nubxndf4pscryd.onion
-# sp3k262uwy4r2k3ycr5awluarykdpag6a7y33jxop4cs2lu5uz5sseqd.onion
-# xa4r2iadxm55fbnqgwwi5mymqdcofiu3w6rpbtqn7b2dyn7mgwj64jyd.onion
-# gi3bsuc5ci2dr4xbh5b3kja5c6p5zk226ymgszzx7ngmjpc25tmnhaqd.onion
-
-addr = 'gi3bsuc5ci2dr4xbh5b3kja5c6p5zk226ymgszzx7ngmjpc25tmnhaqd.onion'
 
 def parse_onion(onion_addr):
   assert onion_addr.endswith('.onion')
@@ -61,6 +53,15 @@ curr_time = calendar.timegm(consensus.valid_after.timetuple())
 
 period,period_length = getperiod(curr_time, 1440), 1440
 
+# test addresses
+# l5satjgud6gucryazcyvyvhuxhr74u6ygigiuyixe3a6ysis67ororad.onion
+# pg6mmjiyjmcrsslvykfwnntlaru7p5svn6y2ymmju6nubxndf4pscryd.onion
+# sp3k262uwy4r2k3ycr5awluarykdpag6a7y33jxop4cs2lu5uz5sseqd.onion
+# xa4r2iadxm55fbnqgwwi5mymqdcofiu3w6rpbtqn7b2dyn7mgwj64jyd.onion
+# gi3bsuc5ci2dr4xbh5b3kja5c6p5zk226ymgszzx7ngmjpc25tmnhaqd.onion
+
+addr = 'gi3bsuc5ci2dr4xbh5b3kja5c6p5zk226ymgszzx7ngmjpc25tmnhaqd.onion'
+
 pub_key = parse_onion(addr)
 blinded_key = get_blinded_key(pub_key, period, period_length)
 
@@ -70,25 +71,24 @@ hs_replicas = 2 # number of separate ranges the descriptor is uploaded to (hsdir
 hs_spread = 3 # length of each range (hsdir_spread_fetch because i'm not uploading any)
 
 hs_range_starts = [tor.sha3_256(b'store-at-idx' + blinded_key + struct.pack('>QQQ', i, period_length, period)) for i in range(1, hs_replicas + 1)]
-hs_dir_indices = [tor.sha3_256(b'node-idx' + bytes(tor.get_router_descriptor(r).id25519.exts[4]) + consensus.srv_curr + struct.pack('>QQ', period, period_length)) for r in hs_dirs]
+hs_dir_indices = sorted([(tor.sha3_256(b'node-idx' + bytes(tor.get_router_descriptor(r).id25519.exts[4]) + consensus.srv_curr + struct.pack('>QQ', period, period_length)), r) for r in hs_dirs])
 
 selected_hs_dirs = []
 
 for start in hs_range_starts:
-  index = bisect.bisect(hs_dir_indices, start) + 1
+  index = bisect.bisect(hs_dir_indices, (start, None)) + 1
   for i in range(hs_spread):
-    while hs_dirs[index] in selected_hs_dirs:
+    while True:
       index += 1
-    selected_hs_dirs.append(hs_dirs[index])
-
-print(selected_hs_dirs)
-
-import sys
-sys.exit()
+      if index >= len(hs_dirs):
+        index = 0
+      if hs_dir_indices[index][1] not in selected_hs_dirs:
+        selected_hs_dirs.append(hs_dir_indices[index][1])
+        break
 
 router1 = random.choice([r for r in consensus.routers if 'Guard' in r.flags])
 router2 = random.choice([r for r in consensus.routers])
-router3 = random.choice([r for r in consensus.routers if 'Exit' in r.flags])
+router3 = random.choice(selected_hs_dirs)
 
 path_routers = [router1, router2, router3]
 
