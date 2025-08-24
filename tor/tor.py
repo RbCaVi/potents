@@ -550,13 +550,18 @@ def decode_relay_connected_cell(cell):
 os.makedirs('cache', exist_ok = True)
 os.makedirs('cache/routers', exist_ok = True)
 
+session = requests.Session()
+
 def get_consensus():
   if not os.path.exists('cache/consensus'):
-    name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
-    print(f'downloading consensus from {name} ({addr})')
-    consensus_response = requests.get(f'http://{addr}/tor/status-vote/current/consensus')
+    while True:
+      name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
+      print(f'downloading consensus from {name} ({addr})')
+      consensus_response = session.get(f'http://{addr}/tor/status-vote/current/consensus')
+      print(f'response code {consensus_response.status_code}')
+      if consensus_response.status_code == 200:
+        break
     consensus_data = consensus_response.text
-    print(f'response code {consensus_response.status_code}')
     with open('cache/consensus.txt', 'w') as f:
       f.write(consensus_data)
     consensus_doc = netdoc.parse_netdoc(consensus_data)
@@ -575,15 +580,25 @@ def get_consensus():
 
 def get_router_descriptor(router):
   filename = f'cache/routers/router-{router.name}-{router.ip}-{router.orport}'
-  name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
-  print(f'downloading router descriptor for {router.name} ({router.ip}:{router.orport}) from {name} ({addr})')
-  router_response = requests.get(f'http://{addr}/tor/server/d/{router.descr_hash.hex()}')
-  router_data = router_response.text
-  print(f'response code {router_response.status_code}')
-  with open(filename + '.txt', 'w') as f:
-    f.write(router_data)
-  router_doc = netdoc.parse_netdoc(router_data)
-  router_parsed = routers.parse_router(router_doc)
+  if not os.path.exists(filename):
+    while True:
+      name,addr,fingerprint = random.choice(tor_dirs.auth_dirs)
+      print(f'downloading router descriptor for {router.name} ({router.ip}:{router.orport}) from {name} ({addr}) [http://{addr}/tor/server/d/{router.descr_hash.hex()}]')
+      router_response = session.get(f'http://{addr}/tor/server/d/{router.descr_hash.hex()}')
+      print(f'response code {router_response.status_code}')
+      if router_response.status_code == 200:
+        break
+    router_data = router_response.text
+    with open(filename + '.txt', 'w', encoding = 'utf-8') as f:
+      f.write(router_data)
+    router_doc = netdoc.parse_netdoc(router_data)
+    router_parsed = routers.parse_router(router_doc)
+    with open(filename, 'wb') as f:
+      pickle.dump(router_parsed, f, 0)
+  else:
+    print(f'using cached router descriptor for {router.name} ({router.ip}:{router.orport})')
+    with open(filename, 'rb') as f:
+      router_parsed = pickle.load(f)
   return router_parsed
 
 class Circuit:
