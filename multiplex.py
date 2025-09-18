@@ -27,7 +27,7 @@ class MyHandler(http.server.BaseHTTPRequestHandler):
             fullpath,
             headers = headers,
             data = {k:v for k,v in forms.items()},
-            #files = files,
+            files = {(k, f.file) for k in files for f in files.getall(k)},
         )
         #print(resp.content)
         #print(resp.headers)
