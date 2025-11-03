@@ -17,8 +17,6 @@ class Value:
     self.value = self.dtype(value)
 
 volume = Value(0.5, dtype = float)
-freq = Value(440, dtype = float)
-factor = Value(0.95, dtype = float)
 
 class G(abc.ABC):
   def __init__(self, inputs = ()):
@@ -38,18 +36,32 @@ class G(abc.ABC):
   def _advance(self, frames):
     # returns the next `frames` audio frames
     pass
+  
+  @abc.abstractmethod
+  def createwidget(self, root):
+    # creates tkinter widgets under `root` that control this [thing]
+    # `root` is a frame or equivalent widget
+    pass
 
-class UserSine(G):
+class Sine(G):
   def __init__(self):
     super().__init__()
     self.position = 0
+    self.freq = 440
   
   def _advance(self, frames):
     factor = 2 * 3.14159 / 44100
-    w = freq.value * factor
+    w = self.freq * factor
     out = np.sin(np.arange(frames, dtype = np.float64) * w + self.position)
     self.position += frames * w
     return np.stack([out, out], axis = 1)
+  
+  def setfreq(self, freq):
+    self.freq = float(freq)
+  
+  def createwidget(self, root):
+    ttk.Label(root, text = "sine").grid(column = 0, row = 0)
+    ttk.Scale(root, from_ = 100, to = 1000, value = self.freq, command = self.setfreq).grid(column = 0, row = 1)
 
 class Delay(G):
   def __init__(self, delay, last):
@@ -61,10 +73,16 @@ class Delay(G):
     b = np.concat((self.delaybuffer, self.inputs[0].buffer), axis = 0)
     self.delaybuffer = b[-self.delay:]
     return b[:-self.delay]
+  
+  def createwidget(self, root):
+    ttk.Label(root, text = "hi").grid(column = 0, row = 0)
 
 class Input(G):
   def _advance(self, frames):
     pass
+  
+  def createwidget(self, root):
+    ttk.Label(root, text = "input").grid(column = 0, row = 0)
 
 class Lowpass(G):
   def __init__(self, factor, last):
@@ -74,14 +92,20 @@ class Lowpass(G):
     self.value = np.zeros((1, 2))
   
   def _advance(self, frames):
-    self.factor = factor.value
     out = np.zeros_like(self.last.buffer)
     for i in range(self.last.buffer.shape[0]):
       self.value = self.factor * self.value + (1 - self.factor) * self.last.buffer[i]
       out[i] = self.value
     return out
+  
+  def setfactor(self, factor):
+    self.factor = float(factor) ** (1 / 20)
+  
+  def createwidget(self, root):
+    ttk.Label(root, text = "lowpass").grid(column = 0, row = 0)
+    ttk.Scale(root, from_ = 0, to = 1, value = self.factor ** 20, command = self.setfactor).grid(column = 0, row = 1)
 
-x = UserSine()
+x = Sine()
 a = Input()
 b = Lowpass(0.95, a)
 
@@ -111,12 +135,6 @@ def main_audio():
     while True:
       sd.sleep(5000)
 
-def volume_slider_callback(value):
-  volume.value = float(value)
-
-def freq_slider_callback(value):
-  freq.value = float(value)
-
 def main_tkinter():
   root = tk.Tk()
   frm = ttk.Frame(root, padding = 10)
@@ -124,8 +142,26 @@ def main_tkinter():
   ttk.Label(frm, text = "volume").grid(column = 0, row = 0)
   ttk.Button(frm, text = "DIE", command = s.exit).grid(column = 0, row = 1)
   ttk.Scale(frm, from_ = 0, to = 1, value = volume.value, command = volume.setvalue).grid(column = 1, row = 0)
-  ttk.Scale(frm, from_ = 100, to = 1000, value = freq.value, command = freq.setvalue).grid(column = 1, row = 1)
-  ttk.Scale(frm, from_ = 0, to = 1, value = factor.value ** 20, command = lambda v: factor.setvalue(float(v) ** (1 / 20))).grid(column = 1, row = 2)
+  (canvas := tk.Canvas(frm, width = 400, height = 300, bg = "white")).grid(column = 0, row = 3, columnspan = 2)
+  def createwindow(canvas):
+    wid = canvas.create_window(0, 0, anchor = tk.NW, window = (w := ttk.Frame(root, padding = (10, 10, 10, 10))))
+    def down(event):
+      global mx, my, grabbed
+      mx = event.x_root
+      my = event.y_root
+      grabbed = wid
+    def move(event):
+      global mx, my
+      canvas.move(grabbed, event.x_root - mx, event.y_root - my)
+      mx = event.x_root
+      my = event.y_root
+    w.bind('<Button-1>', down)
+    w.bind('<B1-Motion>', move)
+    return w
+  ttk.Button(createwindow(canvas), text = "DIE", command = s.exit).grid(column = 0, row = 1)
+  x.createwidget(createwindow(canvas))
+  a.createwidget(createwindow(canvas))
+  b.createwidget(createwindow(canvas))
   root.mainloop()
 
 def main():
