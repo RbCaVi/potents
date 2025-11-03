@@ -18,38 +18,80 @@ class Value:
 
 volume = Value(0.5, dtype = float)
 freq = Value(440, dtype = float)
+factor = Value(0.95, dtype = float)
 
 class G(abc.ABC):
-  def __init__(self):
+  def __init__(self, inputs = ()):
+    self.inputs = inputs
     self.setframe(0)
   
   def setframe(self, frame):
     self.frame = frame
+    self.buffer = numpy.zeros((0, 2))
+  
+  def advance(self, frames):
+    self.frame += frames
+    self.buffer = self._advance(frames)
+    return self.buffer
   
   @abc.abstractmethod
-  def advance(self, frames):
+  def _advance(self, frames):
+    # returns the next `frames` audio frames
     pass
 
-class X(G):
+class UserSine(G):
   def __init__(self):
     super().__init__()
     self.position = 0
   
-  def advance(self, frames):
+  def _advance(self, frames):
     factor = 2 * 3.14159 / 44100
     w = freq.value * factor
     out = np.sin(np.arange(frames, dtype = np.float64) * w + self.position)
-    self.frame += frames
     self.position += frames * w
     return np.stack([out, out], axis = 1)
 
-x = X()
+class Delay(G):
+  def __init__(self, delay, last):
+    super().__init__(inputs = (last,))
+    self.delay = delay
+    self.delaybuffer = numpy.zeros((delay, 2))
+  
+  def _advance(self, frames):
+    b = np.concat((self.delaybuffer, self.inputs[0].buffer), axis = 0)
+    self.delaybuffer = b[-self.delay:]
+    return b[:-self.delay]
+
+class Input(G):
+  def _advance(self, frames):
+    pass
+
+class Lowpass(G):
+  def __init__(self, factor, last):
+    super().__init__(inputs = (last,))
+    self.factor = factor
+    self.last = last
+    self.value = np.zeros((1, 2))
+  
+  def _advance(self, frames):
+    self.factor = factor.value
+    out = np.zeros_like(self.last.buffer)
+    for i in range(self.last.buffer.shape[0]):
+      self.value = self.factor * self.value + (1 - self.factor) * self.last.buffer[i]
+      out[i] = self.value
+    return out
+
+x = UserSine()
+a = Input()
+b = Lowpass(0.95, a)
 
 def audio_callback(indata, outdata, frames, time, status):
   if status:
     print('STATUS:', status)
-  #outdata[:] = indata * volume.value + x.advance(frames) * (1 - volume.value)
-  outdata[:] = x.advance(frames) * volume.value
+  a.buffer = indata
+  b.advance(frames)
+  outdata[:] = b.buffer * volume.value# + x.advance(frames) * (1 - volume.value)
+  #outdata[:] = x.advance(frames) * volume.value
 
 def main_audio():
   #sd.play([float(i) for i in range(100)] * 300, 44100)
@@ -83,6 +125,7 @@ def main_tkinter():
   ttk.Button(frm, text = "DIE", command = s.exit).grid(column = 0, row = 1)
   ttk.Scale(frm, from_ = 0, to = 1, value = volume.value, command = volume.setvalue).grid(column = 1, row = 0)
   ttk.Scale(frm, from_ = 100, to = 1000, value = freq.value, command = freq.setvalue).grid(column = 1, row = 1)
+  ttk.Scale(frm, from_ = 0, to = 1, value = factor.value ** 20, command = lambda v: factor.setvalue(float(v) ** (1 / 20))).grid(column = 1, row = 2)
   root.mainloop()
 
 def main():
