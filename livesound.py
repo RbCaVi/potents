@@ -150,6 +150,7 @@ def main_tkinter():
       mx = event.x_root
       my = event.y_root
       grabbed = wid
+      w.lift()
     def move(event):
       global mx, my
       canvas.move(grabbed, event.x_root - mx, event.y_root - my)
