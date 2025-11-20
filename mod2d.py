@@ -56,7 +56,7 @@ colors = [
 
 blocks = [
   [
-    Block(blockid, random.choice([*Motion.__members__.values()]))
+    Block(blockid, Motion.NONE)
     for blockid in row
   ]
   for row in blockids
@@ -73,6 +73,29 @@ while True:
   for event in pygame.event.get():
     if event.type == pygame.QUIT:
       sys.exit()
+    if event.type == pygame.MOUSEBUTTONDOWN:
+      if event.button == 1:
+        x,y = event.pos
+        xi,xf = divmod(x, blocksize)
+        yi,yf = divmod(y, blocksize)
+        if xi < 0 or xi > len(blocks[0]) or yi < 0 or yi > len(blocks):
+          continue
+        xf /= blocksize
+        yf /= blocksize
+        xf -= 0.5
+        yf -= 0.5
+        if abs(xf) < 0.2 and abs(yf) < 0.2:
+          blocks[yi][xi].motion = Motion.NONE
+        elif abs(xf) > abs(yf):
+          if xf > 0:
+            blocks[yi][xi].motion = Motion.RIGHT
+          else:
+            blocks[yi][xi].motion = Motion.LEFT
+        else:
+          if yf > 0:
+            blocks[yi][xi].motion = Motion.DOWN
+          else:
+            blocks[yi][xi].motion = Motion.UP
   display.fill((255, 255, 255))
   for yi,row in enumerate(blocks):
     for xi,block in enumerate(row):
