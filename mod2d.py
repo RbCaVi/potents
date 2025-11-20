@@ -35,6 +35,7 @@ class Motion(MotionData, enum.Enum):
 class Block:
   blockid: int
   motion: Motion
+  collapsing: bool
 
 blockids = [
   [0, 1, 2, 0, 0, 0, 0, 0],
@@ -56,7 +57,7 @@ colors = [
 
 blocks = [
   [
-    Block(blockid, Motion.NONE)
+    Block(blockid, Motion.NONE, False)
     for blockid in row
   ]
   for row in blockids
@@ -96,6 +97,27 @@ while True:
             blocks[yi][xi].motion = Motion.DOWN
           else:
             blocks[yi][xi].motion = Motion.UP
+    if event.type == pygame.KEYDOWN:
+      if event.key == pygame.K_BACKSPACE:
+        for row in blocks:
+          for block in row:
+            block.motion = Motion.NONE
+            block.collapsing = False
+      if event.key == pygame.K_SPACE:
+        for yi,row in enumerate(blocks):
+          for xi,block in enumerate(row):
+            if block.motion == Motion.NONE:
+              continue
+            into = blocks[yi + block.motion.dy][xi + block.motion.dx]
+            if into.blockid != 0 or into.collapsing:
+              block.motion = Motion.NONE
+              continue
+            into.collapsing = True
+        for yi,row in enumerate(blocks):
+          for xi,block in enumerate(row):
+            blocks[yi][xi] = Block(0, Motion.NONE, False)
+            blocks[yi + block.motion.dy][xi + block.motion.dx] = block
+            block.motion = Motion.NONE
   display.fill((255, 255, 255))
   for yi,row in enumerate(blocks):
     for xi,block in enumerate(row):
@@ -104,5 +126,7 @@ while True:
       pygame.draw.rect(display, colors[block.blockid], (x, y, blocksize, blocksize))
       pygame.draw.rect(display, (255, 255, 255), (x, y, blocksize, blocksize), width = 1)
       pygame.draw.rect(display, (255, 255, 255), (x + blocksize / 2 - 5 + 15 * block.motion.dx, y + blocksize / 2 - 5 + 15 * block.motion.dy, 10, 10))
+      if block.collapsing:
+        pygame.draw.rect(display, (255, 255, 255), (x + blocksize / 4, y + blocksize / 4, blocksize / 2, blocksize / 2), width = 1)
   pygame.display.update()
   clock.tick(60)
