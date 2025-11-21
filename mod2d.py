@@ -5,11 +5,29 @@
 #   [x] define
 #   [x] draw
 # [ ] moving blocks
-#   [ ] collapsing blocks
+#   [x] collapsing blocks
+#   [ ] multipush
+#     [ ] push priority
 # [ ] welding
 # [ ] camera
 #   [ ] moving
 #   [ ] scaling
+# [ ] entity physics
+#   [ ] fast block collision
+#     [ ] block collision
+# [ ] dynamic block data
+#   [x] block types
+# [ ] clone roody 2d
+#   [ ] force blocks
+#     [ ] actuator
+#     [ ] magnet
+#     [ ] force core
+#     [ ] refined core
+#   [ ] crafting
+#     [ ] oxide
+#     [ ] combiner
+#     [ ] extractor
+#     [ ] furnace
 
 import dataclasses
 import sys
