@@ -20,7 +20,7 @@ class Symbol:
 class Terminal(Symbol):
   typ: str
   
-  def __str__(self):
+  def __str__(self) -> str:
     if self.typ[0].isalpha():
       return self.typ
     else:
@@ -30,17 +30,17 @@ class Terminal(Symbol):
 class NonTerminal(Symbol):
   name: str
   
-  def __str__(self):
+  def __str__(self) -> str:
     return f'@{self.name}'
 
 # i'm not making a complex tokenizer today
 
-@dataclasses.dataclass
+@dataclasses.dataclass # type: ignore[misc] # ???
 class Token:
   typ: str
   value: typing.Any
 
-def maketoken(x):
+def maketoken(x: str) -> Token:
   if x.isdigit():
     return Token('int', int(x))
   if x.isalnum():
@@ -61,35 +61,40 @@ rules = {
   NonTerminal('Value'): [production(['int']), production(['id'])],
 }
 
-for rule,productions in rules.items():
-  print(rule, ':=', ' | '.join(' '.join(str(t) for t in p) for p in productions))
+for target,productions in rules.items():
+  print(target, ':=', ' | '.join(' '.join(str(t) for t in p) for p in productions))
 
 # let's start with recursive descent
 # built like parserlang
 # every parser is an iterator
 # requires right recursive rules for some reason
 
-def concat(ps):
-  it = iter(ps)
-  try:
-    p = next(it)
-    pc = concat(it)
-    def parseconcat(s):
-      for s1,v1 in p(s):
-        for s2,v2 in pc(s1):
-          yield s2, [v1, *v2]
-    return parseconcat
-  except StopIteration:
-    return lambda s: iter([[s, []]])
+T = typing.TypeVar('T')
 
-def alternate(ps):
-  def parsealternate(s):
+Parser = typing.Callable[[list[Token]], typing.Iterator[tuple[list[Token], T]]]
+
+def concat(ps: typing.Iterable[Parser[typing.Any]]) -> Parser[list[typing.Any]]:
+  # i don't know how to type hint this without Any, so here's a bunch of # type: ignore[misc]
+  it = iter(ps) # type: ignore[misc]
+  try:
+    p = next(it) # type: ignore[misc]
+    pc = concat(it) # type: ignore[misc]
+    def parseconcat(s: list[Token]) -> typing.Iterator[tuple[list[Token], list[typing.Any]]]:
+      for s1,v1 in p(s): # type: ignore[misc]
+        for s2,v2 in pc(s1): # type: ignore[misc]
+          yield s2, [v1, *v2] # type: ignore[misc]
+    return parseconcat # type: ignore[misc]
+  except StopIteration:
+    return lambda s: iter([(s, [])])
+
+def alternate(ps: typing.Iterator[Parser[T]]) -> Parser[T]:
+  def parsealternate(s: list[Token]) -> typing.Iterator[tuple[list[Token], T]]:
     for p in ps:
       for sv in p(s):
         yield sv
   return parsealternate
 
-def a1(l):
+def a1(l: typing.Iterable[T]) -> T:
   it = iter(l)
   v = next(it)
   try:
@@ -100,10 +105,10 @@ def a1(l):
 
 stack = []
 
-@functools.cache
-def ruleparser(symbol):
+@functools.cache # type: ignore[misc] # ???
+def ruleparser(symbol: Symbol) -> Parser[Token]:
   if isinstance(symbol, Terminal):
-    def parserule(s):
+    def parserule(s: list[Token]) -> typing.Iterator[tuple[list[Token], Token]]:
       #print(symbol)
       if len(s) == 0:
         return
@@ -111,16 +116,19 @@ def ruleparser(symbol):
         yield s[1:], s[0]
     return parserule
   elif isinstance(symbol, NonTerminal):
-    def parserule(s):
+    def parserule(s: list[Token]) -> typing.Iterator[tuple[list[Token], Token]]:
       #print(symbol)
       stack.append(symbol)
       #print(*[s.name for s in stack])
-      yield from alternate(concat(ruleparser(sym) for sym in production) for production in rules[symbol])(s)
+      for s1,v1 in alternate(concat(ruleparser(sym) for sym in production) for production in rules[symbol])(s): # type: ignore[misc] # who cares that this has Any in it tbh
+        yield s1, Token(symbol.name, v1) # type: ignore[misc]
       stack.pop()
     return parserule
+  else:
+    assert False
 
-def full(p):
-  def parsefull(s):
+def full(p: Parser[T]) -> Parser[T]:
+  def parsefull(s: list[Token]) -> typing.Iterator[tuple[list[Token], T]]:
     for s,v in p(s):
       if s == []:
         yield s,v
@@ -172,20 +180,20 @@ rules = {
 @dataclasses.dataclass(frozen = True)
 class RuleState:
   target: NonTerminal
-  production: list[Symbol]
+  production: tuple[Symbol, ...]
   position: int
   
-  def advance(self):
+  def advance(self) -> 'RuleState':
     # return a new RuleState with the parser position moved forward by one symbol
     return RuleState(self.target, self.production, self.position + 1)
   
-  def next(self):
+  def next(self) -> typing.Optional[Symbol]:
     # return the next symbol after the parser position
     if self.position == len(self.production):
       return None
     return self.production[self.position]
 
-def closure(state):
+def closure(state: set[RuleState], rules: dict[NonTerminal, list[list[Symbol]]]) -> set[RuleState]:
   # computes and returns the closure of a set of rules
   out = set()
   stack = [*state]
@@ -200,33 +208,108 @@ def closure(state):
           stack.append(newrule)
   print(out)
   return out
+
+ParserState = frozenset[RuleState]
+
+def generatestates(rules: dict[NonTerminal, list[list[Symbol]]], top: NonTerminal) -> tuple[ParserState, dict[ParserState, dict[Symbol, ParserState]]]:
+  initialstate = frozenset(closure({RuleState(NonTerminal('__TOP__'), (top,), 0)}, rules))
+
+  states: dict[ParserState, dict[Symbol, ParserState]] = {initialstate: {}}
+
+  stack = [initialstate]
+  while len(stack) > 0:
+    currstate = stack.pop()
+    for nextsymbol in {r.next() for r in currstate}:
+      if nextsymbol is None:
+        continue
+      nextstate = set()
+      for rule in currstate:
+        if rule.next() == nextsymbol: # quadratic worst case <3 this is very important
+          nextstate.add(rule.advance())
+      nextstatef = frozenset(closure(nextstate, rules))
+      states[currstate][nextsymbol] = nextstatef
+      states[nextstatef] = {}
+      stack.append(nextstatef)
   
+  return initialstate, states
 
-initialstate = frozenset(closure({RuleState(NonTerminal('__TOP__'), (NonTerminal('Assign'),), 0)}))
-
-states = {initialstate: set()}
-
-stack = [initialstate]
-while len(stack) > 0:
-  currstate = stack.pop()
-  for nextsymbol in {r.next() for r in currstate}:
-    if nextsymbol is None:
-      continue
-    nextstate = set()
-    for rule in currstate:
-      if rule.next() == nextsymbol: # quadratic worst case <3 this is very important
-        nextstate.add(rule.advance())
-    nextstate = frozenset(closure(nextstate))
-    states[currstate].add(nextstate)
-    states[nextstate] = set()
-    stack.append(nextstate)
-
-print(states)
+initialstate,states = generatestates(rules, NonTerminal('Assign'))
 
 mapping = {state:i for i,state in enumerate(states)}
 
 for state in states:
   print(f'state {mapping[state]}')
   for rule in state:
-    print(rule.target, ':=', ' '.join(str(t) for t in rule.production[:rule.position] + ('.',) + rule.production[rule.position:]))
+    print(' ', rule.target, ':=', ' '.join(str(t) for t in rule.production[:rule.position] + ('.',) + rule.production[rule.position:]))
+  if len(states[state]) > 0:
+    print('transitions:')
+    for nextsymbol in states[state]:
+      print(f'  {nextsymbol}: {mapping[states[state][nextsymbol]]}')
+  print()
 
+print(tokens)
+
+class Action:
+  pass
+
+class Shift(Action):
+  nextstate: ParserState
+
+class Reduce(Action):
+  nextstate: ParserState
+  to: NonTerminal
+  count: int
+
+class Accept(Action):
+  pass
+
+class Error(Action):
+  pass
+
+def parsesr(tokens: list[Token], states: dict[ParserState, dict[Symbol, ParserState]], initialstate: ParserState) -> None:
+  stack: list[ParserState] = []
+  state = initialstate
+  tokenstack: list[Token] = []
+
+  def pushstate(newstate: ParserState) -> None:
+    nonlocal state
+    stack.append(state)
+    state = newstate
+
+  def popstate() -> None:
+    nonlocal state
+    state = stack.pop()
+
+  while True:
+    if len(tokens) > 0:
+      nexttoken = tokens[0]
+    else:
+      nexttoken = Token('__EOF__', None)
+    if any(r.position == len(r.production) and r.target == NonTerminal('__TOP__') for r in state) and nexttoken.typ == '__EOF__':
+      # accept
+      return a1(tokenstack)
+    elif Terminal(nexttoken.typ) in states[state]:
+      # shift
+      pushstate(states[state][Terminal(nexttoken.typ)])
+      tokenstack.append(tokens[0])
+      tokens = tokens[1:]
+    elif any(r.position == len(r.production) for r in state):
+      # reduce
+      r = a1(r for r in state if r.position == len(r.production))
+      for i in range(len(r.production)):
+        popstate()
+      reducedtokens = tokenstack[-len(r.production):]
+      tokenstack = tokenstack[:-len(r.production)]
+      pushstate(states[state][r.target])
+      tokenstack.append(Token(r.target.name, reducedtokens))
+    else:
+      # error
+      assert False
+
+def tokentreestr(token: Token):
+  if type(token.value) == list:
+    return token.typ + ''.join('\n  ' + line for t in token.value for line in tokentreestr(t).split('\n'))
+  else:
+    return token.typ + ' ' + repr(token.value)
+
+print(tokentreestr(parsesr(tokens, states, initialstate)))
