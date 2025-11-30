@@ -310,4 +310,6 @@ def tokentreestr(token: Token):
   else:
     return token.typ + ' ' + repr(token.value)
 
+tokens = [*map(maketoken, 'a = 1 + 5 * * 5'.split())]
+
 print(tokentreestr(parsesr(tokens, states, initialstate)))
