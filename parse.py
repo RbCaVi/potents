@@ -212,7 +212,7 @@ def closure(state: set[RuleState], rules: dict[NonTerminal, list[list[Symbol]]])
 ParserState = frozenset[RuleState]
 
 def generatestates(rules: dict[NonTerminal, list[list[Symbol]]], top: NonTerminal) -> tuple[ParserState, dict[ParserState, dict[Symbol, ParserState]]]:
-  initialstate = frozenset(closure({RuleState(NonTerminal('__TOP__'), (top,), 0)}, rules))
+  initialstate = frozenset(closure({RuleState(NonTerminal('__TOP__'), (top, Terminal('__EOF__')), 0)}, rules))
 
   states: dict[ParserState, dict[Symbol, ParserState]] = {initialstate: {}}
 
@@ -266,7 +266,7 @@ class Accept(Action):
 class Error(Action):
   pass
 
-def parsesr(tokens: list[Token], states: dict[ParserState, dict[Symbol, ParserState]], initialstate: ParserState) -> None:
+def parsesr(tokens: list[Token], states: dict[ParserState, dict[Symbol, ParserState]], initialstate: ParserState) -> Token:
   stack: list[ParserState] = []
   state = initialstate
   tokenstack: list[Token] = []
@@ -281,14 +281,10 @@ def parsesr(tokens: list[Token], states: dict[ParserState, dict[Symbol, ParserSt
     state = stack.pop()
 
   while True:
-    if len(tokens) > 0:
-      nexttoken = tokens[0]
-    else:
-      nexttoken = Token('__EOF__', None)
-    if any(r.position == len(r.production) and r.target == NonTerminal('__TOP__') for r in state) and nexttoken.typ == '__EOF__':
-      # accept
-      return a1(tokenstack)
-    elif Terminal(nexttoken.typ) in states[state]:
+    if len(tokens) == 0:
+      tokens.append(Token('__EOF__', None))
+    nexttoken = tokens[0]
+    if Terminal(nexttoken.typ) in states[state]:
       # shift
       pushstate(states[state][Terminal(nexttoken.typ)])
       tokenstack.append(tokens[0])
@@ -300,11 +296,13 @@ def parsesr(tokens: list[Token], states: dict[ParserState, dict[Symbol, ParserSt
         popstate()
       reducedtokens = tokenstack[-len(r.production):]
       tokenstack = tokenstack[:-len(r.production)]
-      pushstate(states[state][r.target])
       tokenstack.append(Token(r.target.name, reducedtokens))
+      if r.target == NonTerminal('__TOP__'):
+        return a1(tokenstack).value[0]
+      pushstate(states[state][r.target])
     else:
       # error
-      assert False
+      assert False, f'''expected one of [{', '.join(t.typ for t in states[state] if isinstance(t, Terminal))}], got {nexttoken.typ}'''
 
 def tokentreestr(token: Token):
   if type(token.value) == list:
