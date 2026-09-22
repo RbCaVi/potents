@@ -9,57 +9,79 @@ def strset(s, i, value):
 def gridset(grid, x, y, value):
   return tuple(strset(col, y, value) if i == x else col for i,col in enumerate(grid))
 
+def isempty(c):
+  return c == ' ' or c == 'x'
+
+def ispushable(c):
+  return c == 'o' or c == 'X'
+
+def pushoff(c):
+  return {'o': ' ', 'X': 'x'}[c]
+
+def pushon(c):
+  return {' ': 'o', 'x': 'X'}[c]
+
+def unfreeze(grid):
+  return [[*l] for l in grid]
+
+def freeze(grid):
+  return tuple(''.join(l) for l in grid)
+
 # a function that takes a state and returns the possible next states
 def nextstates(state):
   (x,y),grid = state
   for dx,dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-    if grid[x + dx][y + dy] == ' ':
+    if isempty(grid[x + dx][y + dy]):
       yield ((x + dx, y + dy), grid), 0
-    if grid[x + dx][y + dy] == 'o' and grid[x + dx * 2][y + dy * 2] == ' ':
-      yield ((x + dx, y + dy), gridset(gridset(grid, x + dx, y + dy, ' '), x + dx * 2, y + dy * 2, 'o')), 1
+    elif grid[x + dx][y + dy] == '+':
+      yield ((x + dx, y + dy), grid), 0
+    elif ispushable(grid[x + dx][y + dy]) and isempty(grid[x + dx * 2][y + dy * 2]):
+      grid2 = unfreeze(grid)
+      grid2[x + dx][y + dy] = pushoff(grid2[x + dx][y + dy])
+      grid2[x + dx * 2][y + dy * 2] = pushon(grid2[x + dx * 2][y + dy * 2])
+      grid2 = freeze(grid2)
+      yield ((x + dx, y + dy), grid2), 1
+
+def rendergrid(surface, grid):
+  for i,j,c in [(i, j, c) for i,row in enumerate(grid) for j,c in enumerate(row)]:
+    color = None
+    if c == '#':
+      color = (247, 210, 88)
+    if c == ' ':
+      color = (186, 186, 186)
+    if c == 'o':
+      color = (34, 162, 247)
+    if c == '+':
+      color = (156, 244, 112)
+    if c == 'x':
+      color = (68, 68, 68)
+    if c == 'X':
+      color = (0, 255, 0)
+    pygame.draw.rect(surface, color, (j * 20 + 50, i * 20 + 50, 20, 20))
 
 def renderstate(surface, state):
   ppos,grid = state
-  for i,j,c in [(i, j, c) for i,row in enumerate(grid) for j,c in enumerate(row)]:
-    color = None
-    if c == '#':
-      color = (247, 210, 88)
-    if c == ' ':
-      color = (186, 186, 186)
-    if c == 'o':
-      color = (34, 162, 247)
-    pygame.draw.rect(surface, color, (i * 20 + 50, j * 20 + 50, 20, 20))
-  pygame.draw.rect(surface, (255, 0, 255), (ppos[0] * 20 + 52, ppos[1] * 20 + 52, 16, 16))
+  rendergrid(surface, grid)
+  pygame.draw.rect(surface, (255, 0, 255), (ppos[1] * 20 + 52, ppos[0] * 20 + 52, 16, 16))
 
 def renderstate2(surface, state): # for collapsed
   grid = next(iter(state))[1]
-  for i,j,c in [(i, j, c) for i,row in enumerate(grid) for j,c in enumerate(row)]:
-    color = None
-    if c == '#':
-      color = (247, 210, 88)
-    if c == ' ':
-      color = (186, 186, 186)
-    if c == 'o':
-      color = (34, 162, 247)
-    pygame.draw.rect(surface, color, (i * 20 + 50, j * 20 + 50, 20, 20))
+  rendergrid(surface, grid)
   for ppos,grid in state:
-    pygame.draw.rect(surface, (255, 0, 255), (ppos[0] * 20 + 52, ppos[1] * 20 + 52, 16, 16))
+    pygame.draw.rect(surface, (255, 0, 255), (ppos[1] * 20 + 52, ppos[0] * 20 + 52, 16, 16))
 
 # a traversal function
 def traverse(initial, nextstates):
   states = {}
   newstates = {initial}
-  while True:
-    nextnewstates = set()
-    for state in newstates:
-      added = dict(nextstates(state))
-      states[state] = added
-      for state in added:
-        if state not in states:
-          nextnewstates.add(state)
-    if len(newstates) == 0:
-      return states
-    newstates = nextnewstates
+  while len(newstates) > 0:
+    state = newstates.pop()
+    added = dict(nextstates(state))
+    states[state] = added
+    for state in added:
+      if state not in states:
+        newstates.add(state)
+  return states
 
 def collapse(graph):
   # collapse edges of type 0
@@ -94,14 +116,17 @@ def toindexes(graph):
   return vertices, {mapping[n1]:{mapping[n2]:edge for n2,edge in edges.items()} for n1,edges in graph.items()}
 
 fullgraph = traverse((
-  (1, 1),
+  (6, 2),
 tuple('''
-######
-#    #
-# oo #
-#    #
-######
-'''.strip().split('\n')),
+  ##### 
+###   # 
+# o # ##
+# #  x #
+#    # #
+##o#x  #
+ #   ###
+ #####  
+'''.strip('\n').split('\n')),
 ), nextstates)
 
 vertices,graph = toindexes(fullgraph)
@@ -113,7 +138,7 @@ print(toindexes(collapse(fullgraph)))
 #vertices,graph = toindexes(collapse(fullgraph))
 
 import pggraph
-pggraph.run(vertices, graph, renderstate)
+#pggraph.run(vertices, graph, renderstate)
 
 vertices,graph = toindexes(collapse(fullgraph))
-#pggraph.run(vertices, graph, renderstate2)
+pggraph.run(vertices, graph, renderstate2)
