@@ -178,9 +178,9 @@ void main() {
   vec2 perp = vec2(dir.y, -dir.x);
   // stretch the arrow to keep the arrowhead the same size
   if (coord.x < 0.5) {
-    gl_Position = vec4(start.xyz, 1.0) * transform + vec4((dir * coord.x + perp * coord.y) * 0.2, 0, 0);
+    gl_Position = vec4(start.xyz, 1.0) * transform * vec4(1, 1, 0.1, 1) + vec4((dir * coord.x + perp * coord.y) * 0.2, 0, 0);
   } else {
-    gl_Position = vec4(end.xyz, 1.0) * transform + vec4((dir * (coord.x - 1) + perp * coord.y) * 0.2, 0, 0);
+    gl_Position = vec4(end.xyz, 1.0) * transform * vec4(1, 1, 0.1, 1) + vec4((dir * (coord.x - 1) + perp * coord.y) * 0.2, 0, 0);
   }
   f_edgekind = edgekind;
 }
