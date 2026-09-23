@@ -55,77 +55,119 @@ def compileprogram(vertex_shader_source, fragment_shader_source, bindings = {}):
   glDeleteShader(vertex_shader)
   glDeleteShader(fragment_shader)
 
-  return program
+  return Program(program)
+
+class Program(collections.namedtuple('Program', ['name'])):
+  def use(self):
+    glUseProgram(self.name)
+
+  def uniform(self, name):
+    return glGetUniformLocation(self.name, name)
+
+  def attr(self, name):
+    return glGetAttribLocation(self.name, name)
+
+  def __enter__(self):
+    self._last = glGetIntegerv(GL_CURRENT_PROGRAM)
+    self.use()
+    return
+
+  def __exit__(self, _1, _2, _3):
+    glUseProgram(self._last)
+    self._last = None
+    return False
 
 # set uniform variables
-def setfloat(program, name, f):
-  uniform = glGetUniformLocation(program, name)
+def setfloat(uniform, f):
   glUniform1f(uniform, f)
 
-def setint(program, name, i):
-  uniform = glGetUniformLocation(program, name)
+def setint(uniform, i):
   glUniform1i(uniform, i)
 
-def setmat4(program, name, m):
-  uniform = glGetUniformLocation(program, name)
+def setmat4(uniform, m):
   glUniformMatrix4fv(uniform, 1, False, numpy.array(m).flatten())
 
 def createVAO():
-  return glGenVertexArrays(1)
+  return VertexArray(glGenVertexArrays(1))
 
-VertArray = collections.namedtuple('VertArray', ['vao', 'name', 'size'])
+class VertexArray(collections.namedtuple('VertexArray', ['name'])):
+  def bind(self):
+    glBindVertexArray(self.name)
 
-# create an array buffer
-# pre "set" the stride (floats per vertex / instance)
-# because i think usually you would want to have
-# all the attributes stored in an array have the same stride
-# returns an array object that can be used in loadFloatArray and applyvd / applyvdinstanced
-def createArray(vao, size): # size is the number of floats in a vertex
-  glBindVertexArray(vao)
-  name = glGenBuffers(1)
-  return VertArray(vao, name, size)
+  def __enter__(self):
+    self._last = glGetIntegerv(GL_VERTEX_ARRAY_BINDING)
+    self.bind()
+    return
 
-# load a 2d numpy array of floats into an array buffer
-# it must have the same number of floats per vertex
-def loadFloatArray(array, data, kind = GL_STATIC_DRAW):
-  count,size = data.shape
-  assert array.size == size
-  glBindVertexArray(array.vao)
-  glBindBuffer(GL_ARRAY_BUFFER, array.name)
-  glBufferData(GL_ARRAY_BUFFER, count * array.size * sizeof(c_float), data.flatten(), kind)
+  def __exit__(self, _1, _2, _3):
+    glBindVertexArray(self._last)
+    self._last = None
+    return False
 
-# set a vertex attribute
-# returns an attribute object that can be used in enableAttr / disableAttr and glAttr
-def applyvd(program, array, name, size, offset):
-  attr = glGetAttribLocation(program, name)
-  glBindBuffer(GL_ARRAY_BUFFER, array.name)
-  glVertexAttribPointer(attr, size, GL_FLOAT, False, array.size * sizeof(c_float), c_void_p(offset * sizeof(c_float)))
-  enableAttr((array, attr))
-  return array, attr
+class VertexBuffer(collections.namedtuple('VertexBuffer', ['vao', 'name', 'size'])):
+  # create an array buffer
+  # pre "set" the stride (floats per vertex / instance)
+  # because i think usually you would want to have
+  # all the attributes stored in an array have the same stride
+  # returns an array object
+  @staticmethod
+  def new(vao, size): # size is the number of floats in a vertex
+    vao.bind()
+    name = glGenBuffers(1)
+    return VertexBuffer(vao, name, size)
 
-# set an instance attribute
-# returns an attribute object that can be used in enableAttr / disableAttr and glAttr
-def applyvdinstanced(program, array, name, size, offset):
-  array,attr = applyvd(program, array, name, size, offset)
-  glVertexAttribDivisor(attr, 1)
-  return array, attr
+  @staticmethod
+  def new_data(vao, data, kind = GL_STATIC_DRAW): # load data at construction
+    count,size = data.shape
+    return VertexBuffer.new(vao, size).loadFloatArray(data, kind)
 
-# whatever glEnableVertexAttribArray does
-def enableAttr(attr):
-  glBindBuffer(GL_ARRAY_BUFFER, attr[0][0])
-  glEnableVertexAttribArray(attr[1])
+  # load a 2d numpy array of floats into an array buffer
+  # it must have the same number of floats per vertex
+  def loadFloatArray(self, data, kind = GL_STATIC_DRAW):
+    count,size = data.shape
+    assert self.size == size
+    self.vao.bind()
+    self.bind()
+    glBufferData(GL_ARRAY_BUFFER, count * self.size * sizeof(c_float), data.flatten(), kind)
+    return self
 
-# whatever glDisableVertexAttribArray does
-def disableAttr(attr):
-  glBindBuffer(GL_ARRAY_BUFFER, attr[0][0])
-  glDisableVertexAttribArray(attr[1])
+  # set a vertex attribute
+  # returns an attribute object
+  def applyvd(self, attr, size, offset):
+    self.bind()
+    glVertexAttribPointer(attr, size, GL_FLOAT, False, self.size * sizeof(c_float), c_void_p(offset * sizeof(c_float)))
+    attr = VertexAttribute(self, attr)
+    attr.enable()
+    return attr
 
-# enable a vertex / instance attribute inside a with block
-@contextlib.contextmanager
-def glAttr(attr):
-  enableAttr(attr)
-  yield
-  disableAttr(attr)
+  # set an instance attribute
+  # returns an attribute object
+  def applyvdinstanced(self, attr, size, offset):
+    attr = self.applyvd(attr, size, offset)
+    glVertexAttribDivisor(attr.name, 1)
+    return attr
+
+  def bind(self):
+    glBindBuffer(GL_ARRAY_BUFFER, self.name)
+
+class VertexAttribute(collections.namedtuple('VertexAttribute', ['array', 'name'])):
+  # whatever glEnableVertexAttribArray does
+  def enable(self):
+    self.array.bind()
+    glEnableVertexAttribArray(self.name)
+
+  # whatever glDisableVertexAttribArray does
+  def disable(self):
+    self.array.bind()
+    glDisableVertexAttribArray(self.name)
+
+  def __enter__(self):
+    self.enable()
+    return
+
+  def __exit__(self, _1, _2, _3):
+    self.disable()
+    return False
 
 # the shader and geometry for the graph nodes
 nodeverts = numpy.array([
@@ -284,37 +326,31 @@ def run(vertices, graph, kinds, renderstate):
   arrowprogram = compileprogram(arrowvert, arrowfrag)
   bgprogram = compileprogram(bgvert, bgfrag)
 
-  glUseProgram(nodeprogram)
-  vao1 = createVAO()
+  with nodeprogram:
+    vao1 = createVAO()
 
-  verts = createArray(vao1, 2)
-  loadFloatArray(verts, nodeverts)
-  applyvd(nodeprogram, verts, "coord", 2, 0)
+    VertexBuffer.new_data(vao1, nodeverts).applyvd(nodeprogram.attr("coord"), 2, 0)
 
-  poss = createArray(vao1, 3)
-  applyvdinstanced(nodeprogram, poss, "off", 3, 0)
+    poss = VertexBuffer.new(vao1, 3)
+    poss.applyvdinstanced(nodeprogram.attr("off"), 3, 0)
 
-  nodekinds = createArray(vao1, 1)
-  applyvdinstanced(nodeprogram, nodekinds, "nodekind", 1, 0)
+    nodekinds = VertexBuffer.new(vao1, 1)
+    nodekinds.applyvdinstanced(nodeprogram.attr("nodekind"), 1, 0)
 
-  glUseProgram(arrowprogram)
-  vao2 = createVAO()
+  with arrowprogram:
+    vao2 = createVAO()
 
-  verts2 = createArray(vao2, 2)
-  loadFloatArray(verts2, arrowverts)
-  applyvd(arrowprogram, verts2, "coord", 2, 0)
+    VertexBuffer.new_data(vao2, arrowverts).applyvd(arrowprogram.attr("coord"), 2, 0)
 
-  edgedata = createArray(vao2, 7)
-  applyvdinstanced(arrowprogram, edgedata, "start", 3, 0)
-  applyvdinstanced(arrowprogram, edgedata, "end", 3, 3)
-  applyvdinstanced(arrowprogram, edgedata, "edgekind", 1, 6)
+    edgedata = VertexBuffer.new(vao2, 7)
+    edgedata.applyvdinstanced(arrowprogram.attr("start"), 3, 0)
+    edgedata.applyvdinstanced(arrowprogram.attr("end"), 3, 3)
+    edgedata.applyvdinstanced(arrowprogram.attr("edgekind"), 1, 6)
 
-  glUseProgram(bgprogram)
-  vao3 = createVAO()
+  with bgprogram:
+    vao3 = createVAO()
 
-  verts3 = createArray(vao3, 2)
-  loadFloatArray(verts3, bgverts)
-  applyvd(bgprogram, verts3, "coord", 2, 0)
+    VertexBuffer.new_data(vao3, bgverts).applyvd(bgprogram.attr("coord"), 2, 0)
 
   # create a texture for pygame to render to
   screentexture = glGenTextures(1)
@@ -357,29 +393,32 @@ def run(vertices, graph, kinds, renderstate):
         | GL_DEPTH_BUFFER_BIT)  # and the depth buffer
 
     # draw the screen texture to the screen
-    glUseProgram(bgprogram)
-    glBindVertexArray(vao3)
+    with bgprogram:
+      vao3.bind()
+      setint(bgprogram.uniform('img'), screentexture)
 
-    setint(bgprogram, 'img', screentexture)
-
-    glDrawArrays(GL_TRIANGLES, 0, 6)
+      glDrawArrays(GL_TRIANGLES, 0, 6)
 
     # draw the nodes
-    glUseProgram(nodeprogram)
-    glBindVertexArray(vao1)
-    loadFloatArray(poss, pos, GL_DYNAMIC_DRAW)
-    loadFloatArray(nodekinds, kinds[:, numpy.newaxis], GL_DYNAMIC_DRAW)
-    setmat4(nodeprogram, 'transform', transform)
+    with nodeprogram:
+      vao1.bind()
+      poss.loadFloatArray(pos, GL_DYNAMIC_DRAW)
+      nodekinds.loadFloatArray(kinds[:, numpy.newaxis], GL_DYNAMIC_DRAW)
+      setmat4(nodeprogram.uniform('transform'), transform)
 
-    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, len(pos))
+      glDrawArraysInstanced(GL_TRIANGLES, 0, 6, len(pos))
 
     # draw the edges
-    glUseProgram(arrowprogram)
-    glBindVertexArray(vao2)
-    loadFloatArray(edgedata, numpy.concatenate((pos[edges[:, 0]], pos[edges[:, 1]], edges[:, 2, numpy.newaxis].astype(numpy.float32)), axis = 1), GL_DYNAMIC_DRAW)
-    setmat4(arrowprogram, 'transform', transform)
+    with arrowprogram:
+      vao2.bind()
+      edgedata.loadFloatArray(numpy.concatenate((
+        pos[edges[:, 0]],
+        pos[edges[:, 1]],
+        edges[:, 2, numpy.newaxis].astype(numpy.float32),
+      ), axis = 1), GL_DYNAMIC_DRAW)
+      setmat4(nodeprogram.uniform('transform'), transform)
 
-    glDrawArraysInstanced(GL_LINES, 0, 6, len(edges))
+      glDrawArraysInstanced(GL_LINES, 0, 6, len(edges))
 
     # refresh the display and wait for framerate
     pygame.display.flip()
