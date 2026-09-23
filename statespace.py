@@ -115,6 +115,21 @@ def toindexes(graph):
   mapping = {k:i for i,k in enumerate(vertices)}
   return vertices, {mapping[n1]:{mapping[n2]:edge for n2,edge in edges.items()} for n1,edges in graph.items()}
 
+def classify(graph, classifier):
+  return {node:classifier(node) for node in graph}
+
+def classify1(state):
+  _,grid = state
+  if all(all(c != 'x' for c in row) for row in grid):
+    return 1
+  return 0
+
+def classify2(state):
+  _,grid = next(iter(state))
+  if all(all(c != 'x' for c in row) for row in grid):
+    return 1
+  return 0
+
 fullgraph = traverse((
   (6, 2),
 tuple('''
@@ -131,14 +146,19 @@ tuple('''
 
 vertices,graph = toindexes(fullgraph)
 
-print(vertices, graph)
+kinds = classify(fullgraph, classify1)
 
-print(toindexes(collapse(fullgraph)))
+collapsedgraph = collapse(fullgraph)
+cvertices,cgraph = toindexes(collapsedgraph)
 
-#vertices,graph = toindexes(collapse(fullgraph))
+ckinds = classify(collapsedgraph, classify2)
+
+print(vertices, graph, kinds)
+print(cvertices, cgraph, ckinds)
 
 import pggraph
-#pggraph.run(vertices, graph, renderstate)
 
-vertices,graph = toindexes(collapse(fullgraph))
-pggraph.run(vertices, graph, renderstate2)
+if True:
+  pggraph.run(vertices, graph, kinds, renderstate)
+else:
+  pggraph.run(cvertices, cgraph, ckinds, renderstate2)

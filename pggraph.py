@@ -144,18 +144,28 @@ uniform mat4 transform; // camera transform
 
 attribute vec2 coord; // node geometry
 attribute vec3 off; // position of node
+attribute float nodekind;
+varying float f_nodekind;
 
 void main() {
   // draw the node with a size and orientation unaffected by the transform
   gl_Position = vec4(off, 1.0) * transform + vec4(coord * 0.1, 0, 0);
+  f_nodekind = nodekind;
 }
 """
 
 nodefrag = """
 #version 120
 
+varying float f_nodekind;
+
 void main() {
-  gl_FragData[0] = vec4(1.0, 0.0, 0.0, 1.0);
+  // color the node by its kind
+  if (f_nodekind < 0.5) {
+    gl_FragData[0] = vec4(1.0, 0.0, 0.0, 1.0);
+  } else {
+    gl_FragData[0] = vec4(0.0, 1.0, 0.0, 1.0);
+  }
 }
 """
 
@@ -244,7 +254,7 @@ void main() {
 }
 """
 
-def run(vertices, graph, renderstate):
+def run(vertices, graph, kinds, renderstate):
   # create a mask of which edges have attraction forces applied
   # and a list of edges
   mask = numpy.full((len(graph), len(graph), 3), True, dtype = numpy.bool)
@@ -257,6 +267,8 @@ def run(vertices, graph, renderstate):
       edges.append((i, j, graph[i][j]))
 
   edges = numpy.array(edges, dtype = numpy.int32).reshape((len(edges), 3))
+
+  kinds = numpy.array([kinds[v] for v in vertices])
 
   # initialize the node positions
   pos = numpy.array([(random.uniform(-1, 1), random.uniform(-1, 1), random.uniform(-1, 1)) for k in graph], dtype = numpy.float32)
@@ -282,6 +294,8 @@ def run(vertices, graph, renderstate):
   poss = createArray(vao1, 3)
   applyvdinstanced(nodeprogram, poss, "off", 3, 0)
 
+  nodekinds = createArray(vao1, 1)
+  applyvdinstanced(nodeprogram, nodekinds, "nodekind", 1, 0)
 
   glUseProgram(arrowprogram)
   vao2 = createVAO()
@@ -354,6 +368,7 @@ def run(vertices, graph, renderstate):
     glUseProgram(nodeprogram)
     glBindVertexArray(vao1)
     loadFloatArray(poss, pos, GL_DYNAMIC_DRAW)
+    loadFloatArray(nodekinds, kinds[:, numpy.newaxis], GL_DYNAMIC_DRAW)
     setmat4(nodeprogram, 'transform', transform)
 
     glDrawArraysInstanced(GL_TRIANGLES, 0, 6, len(pos))
