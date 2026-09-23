@@ -104,29 +104,27 @@ class VertexArray(collections.namedtuple('VertexArray', ['name'])):
     self._last = None
     return False
 
-class VertexBuffer(collections.namedtuple('VertexBuffer', ['vao', 'name', 'size'])):
+class VertexBuffer(collections.namedtuple('VertexBuffer', ['name', 'size'])):
   # create an array buffer
   # pre "set" the stride (floats per vertex / instance)
   # because i think usually you would want to have
   # all the attributes stored in an array have the same stride
   # returns an array object
   @staticmethod
-  def new(vao, size): # size is the number of floats in a vertex
-    vao.bind()
+  def new(size): # size is the number of floats in a vertex
     name = glGenBuffers(1)
-    return VertexBuffer(vao, name, size)
+    return VertexBuffer(name, size)
 
   @staticmethod
-  def new_data(vao, data, kind = GL_STATIC_DRAW): # load data at construction
+  def new_data(data, kind = GL_STATIC_DRAW): # load data at construction
     count,size = data.shape
-    return VertexBuffer.new(vao, size).loadFloatArray(data, kind)
+    return VertexBuffer.new(size).loadFloatArray(data, kind)
 
   # load a 2d numpy array of floats into an array buffer
   # it must have the same number of floats per vertex
   def loadFloatArray(self, data, kind = GL_STATIC_DRAW):
     count,size = data.shape
     assert self.size == size
-    self.vao.bind()
     self.bind()
     glBufferData(GL_ARRAY_BUFFER, count * self.size * sizeof(c_float), data.flatten(), kind)
     return self
@@ -327,30 +325,37 @@ def run(vertices, graph, kinds, renderstate):
   bgprogram = compileprogram(bgvert, bgfrag)
 
   with nodeprogram:
-    vao1 = createVAO()
+    nodecoords = VertexBuffer.new_data(nodeverts)
+    poss1 = VertexBuffer.new(3)
+    poss2 = VertexBuffer.new(3)
+    nodekinds = VertexBuffer.new(1)
 
-    VertexBuffer.new_data(vao1, nodeverts).applyvd(nodeprogram.attr("coord"), 2, 0)
+    nodevao1 = createVAO()
+    with nodevao1:
+      nodecoords.applyvd(nodeprogram.attr("coord"), 2, 0)
+      poss1.applyvdinstanced(nodeprogram.attr("off"), 3, 0)
+      nodekinds.applyvdinstanced(nodeprogram.attr("nodekind"), 1, 0)
 
-    poss = VertexBuffer.new(vao1, 3)
-    poss.applyvdinstanced(nodeprogram.attr("off"), 3, 0)
-
-    nodekinds = VertexBuffer.new(vao1, 1)
-    nodekinds.applyvdinstanced(nodeprogram.attr("nodekind"), 1, 0)
+    nodevao2 = createVAO()
+    with nodevao2:
+      nodecoords.applyvd(nodeprogram.attr("coord"), 2, 0)
+      poss2.applyvdinstanced(nodeprogram.attr("off"), 3, 0)
+      nodekinds.applyvdinstanced(nodeprogram.attr("nodekind"), 1, 0)
 
   with arrowprogram:
-    vao2 = createVAO()
+    arrowvao = createVAO()
+    with arrowvao:
+      VertexBuffer.new_data(arrowverts).applyvd(arrowprogram.attr("coord"), 2, 0)
 
-    VertexBuffer.new_data(vao2, arrowverts).applyvd(arrowprogram.attr("coord"), 2, 0)
-
-    edgedata = VertexBuffer.new(vao2, 7)
-    edgedata.applyvdinstanced(arrowprogram.attr("start"), 3, 0)
-    edgedata.applyvdinstanced(arrowprogram.attr("end"), 3, 3)
-    edgedata.applyvdinstanced(arrowprogram.attr("edgekind"), 1, 6)
+      edgedata = VertexBuffer.new(7)
+      edgedata.applyvdinstanced(arrowprogram.attr("start"), 3, 0)
+      edgedata.applyvdinstanced(arrowprogram.attr("end"), 3, 3)
+      edgedata.applyvdinstanced(arrowprogram.attr("edgekind"), 1, 6)
 
   with bgprogram:
-    vao3 = createVAO()
-
-    VertexBuffer.new_data(vao3, bgverts).applyvd(bgprogram.attr("coord"), 2, 0)
+    bgvao = createVAO()
+    with bgvao:
+      VertexBuffer.new_data(bgverts).applyvd(bgprogram.attr("coord"), 2, 0)
 
   # create a texture for pygame to render to
   screentexture = glGenTextures(1)
@@ -393,24 +398,26 @@ def run(vertices, graph, kinds, renderstate):
         | GL_DEPTH_BUFFER_BIT)  # and the depth buffer
 
     # draw the screen texture to the screen
-    with bgprogram:
-      vao3.bind()
+    with bgprogram, bgvao:
       setint(bgprogram.uniform('img'), screentexture)
 
       glDrawArrays(GL_TRIANGLES, 0, 6)
 
+    #with forceprogram, forcevao:
+    #  pass
+
     # draw the nodes
-    with nodeprogram:
-      vao1.bind()
-      poss.loadFloatArray(pos, GL_DYNAMIC_DRAW)
+    nodevao2,nodevao1 = nodevao1,nodevao2
+    with nodeprogram, nodevao1 as nodevao:
+      poss1.loadFloatArray(pos, GL_DYNAMIC_DRAW)
+      poss2.loadFloatArray(pos, GL_DYNAMIC_DRAW)
       nodekinds.loadFloatArray(kinds[:, numpy.newaxis], GL_DYNAMIC_DRAW)
       setmat4(nodeprogram.uniform('transform'), transform)
 
       glDrawArraysInstanced(GL_TRIANGLES, 0, 6, len(pos))
 
     # draw the edges
-    with arrowprogram:
-      vao2.bind()
+    with arrowprogram, arrowvao:
       edgedata.loadFloatArray(numpy.concatenate((
         pos[edges[:, 0]],
         pos[edges[:, 1]],
