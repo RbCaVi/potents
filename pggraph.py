@@ -57,6 +57,19 @@ def compileprogram(vertex_shader_source, fragment_shader_source, bindings = {}):
 
   return Program(program)
 
+# compile and link a compute shader program from glsl source code
+# return the program handle
+def compilecomputeprogram(compute_shader_source):
+  compute_shader = compileshader(compute_shader_source, GL_COMPUTE_SHADER)
+
+  program = glCreateProgram()
+  glAttachShader(program, compute_shader)
+  glLinkProgram(program)
+  assert glGetProgramiv(program, GL_LINK_STATUS), glGetProgramInfoLog(program)
+  glDeleteShader(compute_shader)
+
+  return Program(program)
+
 class Program(collections.namedtuple('Program', ['name'])):
   def use(self):
     glUseProgram(self.name)
@@ -294,6 +307,48 @@ void main() {
 }
 """
 
+forcecompute = """
+#version 430
+
+layout(local_size_x = 128) in;
+
+uniform float cs;
+uniform float cr;
+uniform float l;
+
+uniform int size;
+
+readonly restrict buffer EdgeStrength {
+  float edgestrength[];
+};
+
+readonly restrict buffer Pos1 {
+  vec3 pos1[];
+};
+
+writeonly restrict buffer Pos2 {
+  vec3 pos2[];
+};
+
+vec3 calcforce(vec3 pos1, vec3 pos2, float strength) {
+  return vec3(0.001, 0.001, 0.001);
+}
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  if (i >= size) {
+    return;
+  }
+  vec3 posi = pos1[i];
+  vec3 pos = pos1[i];
+  for (int j = 0; j < size; j++) {
+    vec3 posj = pos1[j];
+    pos += calcforce(posi, posj, /*edgestrength[i * size + j]*/0);
+  }
+  pos2[i] = pos;
+}
+"""
+
 def run(vertices, graph, kinds, renderstate):
   # create a mask of which edges have attraction forces applied
   # and a list of edges
@@ -323,11 +378,12 @@ def run(vertices, graph, kinds, renderstate):
   nodeprogram = compileprogram(nodevert, nodefrag)
   arrowprogram = compileprogram(arrowvert, arrowfrag)
   bgprogram = compileprogram(bgvert, bgfrag)
+  forceprogram = compilecomputeprogram(forcecompute)
 
   with nodeprogram:
     nodecoords = VertexBuffer.new_data(nodeverts)
-    poss1 = VertexBuffer.new(3)
-    poss2 = VertexBuffer.new(3)
+    poss1 = VertexBuffer.new(4)
+    poss2 = VertexBuffer.new(4)
     nodekinds = VertexBuffer.new(1)
 
     nodevao1 = createVAO()
@@ -357,6 +413,14 @@ def run(vertices, graph, kinds, renderstate):
     with bgvao:
       VertexBuffer.new_data(bgverts).applyvd(bgprogram.attr("coord"), 2, 0)
 
+  with forceprogram:
+    setfloat(forceprogram.uniform('cs'), cs)
+    setfloat(forceprogram.uniform('cr'), cr)
+    setfloat(forceprogram.uniform('l'), l)
+
+    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "pos1"), 0)
+    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "pos2"), 1)
+
   # create a texture for pygame to render to
   screentexture = glGenTextures(1)
   glBindTexture(GL_TEXTURE_2D, screentexture)
@@ -370,6 +434,15 @@ def run(vertices, graph, kinds, renderstate):
   mind = 1 # minimum distance from mouse pointer to node
 
   transform = glm.scale(glm.vec3(0.2, 0.2, 0.2)) * glm.rotate(0.5, glm.vec3(0, 0, 1)) # current transform
+
+  poss1.loadFloatArray(numpy.concatenate((
+    pos,
+    pos[:, 1, numpy.newaxis],
+  ), axis = 1), GL_DYNAMIC_DRAW)
+  poss2.loadFloatArray(numpy.concatenate((
+    pos,
+    pos[:, 1, numpy.newaxis],
+  ), axis = 1), GL_DYNAMIC_DRAW)
 
   while True:
     screen.fill((0, 0, 0))
@@ -403,14 +476,23 @@ def run(vertices, graph, kinds, renderstate):
 
       glDrawArrays(GL_TRIANGLES, 0, 6)
 
-    #with forceprogram, forcevao:
-    #  pass
+    poss2,poss1 = poss1,poss2
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, poss1.name)
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, poss2.name)
+
+    # how do i swap the buffers ?
+    with forceprogram, bgvao:
+      setint(forceprogram.uniform('size'), len(pos))
+
+      glDispatchCompute(len(pos) // 128 + 1, 1, 1)
+
+      glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT)
 
     # draw the nodes
     nodevao2,nodevao1 = nodevao1,nodevao2
     with nodeprogram, nodevao1 as nodevao:
-      poss1.loadFloatArray(pos, GL_DYNAMIC_DRAW)
-      poss2.loadFloatArray(pos, GL_DYNAMIC_DRAW)
+      #poss1.loadFloatArray(pos, GL_DYNAMIC_DRAW)
+      #poss2.loadFloatArray(pos, GL_DYNAMIC_DRAW)
       nodekinds.loadFloatArray(kinds[:, numpy.newaxis], GL_DYNAMIC_DRAW)
       setmat4(nodeprogram.uniform('transform'), transform)
 
@@ -439,6 +521,7 @@ def run(vertices, graph, kinds, renderstate):
         savedpos = pos[pressedi].copy()
 
     # node physics
+    # TIME: O(n^2) # maybe make a compute shader?
     disps = pos[numpy.newaxis, :, :] - pos[:, numpy.newaxis, :] # displacement
     dist2s = numpy.sum(disps ** 2, axis = 2) # distance squared
     dists = numpy.sqrt(dist2s) # distance
@@ -451,7 +534,7 @@ def run(vertices, graph, kinds, renderstate):
     
     # despite being labelled "force", they are actually velocity
     fs = fattrs + freps
-    pos += fs.sum(0) # sum over axis 0
+    #pos += fs.sum(0) # sum over axis 0
 
     # mouse position and mouse movement
     mpos = glm.vec2(pygame.mouse.get_pos()) / size * 2 - 1
@@ -479,6 +562,7 @@ def run(vertices, graph, kinds, renderstate):
         transform = glm.rotate(angle, axis) * transform
 
     # find the closest node to the mouse
+    # TIME: O(n)
     mind = math.inf
     mini = None
     for i,npos in enumerate(pos):
