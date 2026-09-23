@@ -25,7 +25,7 @@ pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEX
 # spring layout parameters
 cs = 0.02
 l = 0.1
-cr = 0.005
+cr = 0.02
 
 interactrad = 0.05
 
@@ -129,12 +129,12 @@ def glAttr(attr):
 
 # the shader and geometry for the graph nodes
 nodeverts = numpy.array([
-  [-0.1, -0.1],
-  [-0.1,  0.1],
-  [ 0.1,  0.1],
-  [ 0.1, -0.1],
-  [-0.1, -0.1],
-  [ 0.1,  0.1],
+  [-0.02, -0.02],
+  [-0.02,  0.02],
+  [ 0.02,  0.02],
+  [ 0.02, -0.02],
+  [-0.02, -0.02],
+  [ 0.02,  0.02],
 ], dtype = numpy.float32)
 
 nodevert = """
@@ -149,7 +149,7 @@ varying float f_nodekind;
 
 void main() {
   // draw the node with a size and orientation unaffected by the transform
-  gl_Position = vec4(off, 1.0) * transform + vec4(coord * 0.1, 0, 0);
+  gl_Position = vec4(off, 1.0) * transform * vec4(1, 1, 0.1, 1) + vec4(coord, 0, 0);
   f_nodekind = nodekind;
 }
 """
