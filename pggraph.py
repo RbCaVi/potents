@@ -7,7 +7,7 @@ import pygame.locals
 from OpenGL.GL import *
 import sys
 import math
-
+import collections
 import numpy
 from ctypes import *
 
@@ -18,8 +18,8 @@ from pyglm import glm
 pygame.init()
 
 # request a 3.1 opengl i guess
-pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 3)
-pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 1)
+pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MAJOR_VERSION, 4)
+pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
 pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
 
 # spring layout parameters
@@ -70,37 +70,45 @@ def setmat4(program, name, m):
   uniform = glGetUniformLocation(program, name)
   glUniformMatrix4fv(uniform, 1, False, numpy.array(m).flatten())
 
+def createVAO():
+  return glGenVertexArrays(1)
+
+VertArray = collections.namedtuple('VertArray', ['vao', 'name', 'size'])
+
 # create an array buffer
 # pre "set" the stride (floats per vertex / instance)
 # because i think usually you would want to have
 # all the attributes stored in an array have the same stride
-# returns a handle object that can be used in loadFloatArray and applyvd / applyvdinstanced
-def createArray(size): # size is the number of floats in a vertex
-  handle = glGenBuffers(1)
-  return handle, size
+# returns an array object that can be used in loadFloatArray and applyvd / applyvdinstanced
+def createArray(vao, size): # size is the number of floats in a vertex
+  glBindVertexArray(vao)
+  name = glGenBuffers(1)
+  return VertArray(vao, name, size)
 
 # load a 2d numpy array of floats into an array buffer
 # it must have the same number of floats per vertex
-def loadFloatArray(handle, data, kind = GL_STATIC_DRAW):
+def loadFloatArray(array, data, kind = GL_STATIC_DRAW):
   count,size = data.shape
-  assert handle[1] == size
-  glBindBuffer(GL_ARRAY_BUFFER, handle[0])
-  glBufferData(GL_ARRAY_BUFFER, count * handle[1] * sizeof(c_float), data.flatten(), kind)
+  assert array.size == size
+  glBindVertexArray(array.vao)
+  glBindBuffer(GL_ARRAY_BUFFER, array.name)
+  glBufferData(GL_ARRAY_BUFFER, count * array.size * sizeof(c_float), data.flatten(), kind)
 
 # set a vertex attribute
 # returns an attribute object that can be used in enableAttr / disableAttr and glAttr
-def applyvd(program, handle, name, size, offset):
+def applyvd(program, array, name, size, offset):
   attr = glGetAttribLocation(program, name)
-  glBindBuffer(GL_ARRAY_BUFFER, handle[0])
-  glVertexAttribPointer(attr, size, GL_FLOAT, False, handle[1] * sizeof(c_float), c_void_p(offset * sizeof(c_float)))
-  return handle, attr
+  glBindBuffer(GL_ARRAY_BUFFER, array.name)
+  glVertexAttribPointer(attr, size, GL_FLOAT, False, array.size * sizeof(c_float), c_void_p(offset * sizeof(c_float)))
+  enableAttr((array, attr))
+  return array, attr
 
 # set an instance attribute
 # returns an attribute object that can be used in enableAttr / disableAttr and glAttr
-def applyvdinstanced(program, handle, name, size, offset):
-  handle,attr = applyvd(program, handle, name, size, offset)
+def applyvdinstanced(program, array, name, size, offset):
+  array,attr = applyvd(program, array, name, size, offset)
   glVertexAttribDivisor(attr, 1)
-  return handle, attr
+  return array, attr
 
 # whatever glEnableVertexAttribArray does
 def enableAttr(attr):
@@ -260,32 +268,39 @@ def run(vertices, graph, renderstate):
   glClearColor(0.0, 0.0, 0.0, 0.0)
 
   # compile the programs and set up their geometry and attributes
-  nodeprogram = compileprogram(nodevert, nodefrag, {'coord': 0, 'off': 1})
-  arrowprogram = compileprogram(arrowvert, arrowfrag, {'coord': 2, 'start': 3, 'end': 4, 'edgekind': 5})
-  bgprogram = compileprogram(bgvert, bgfrag, {'coord': 6, 'img': 7})
+  nodeprogram = compileprogram(nodevert, nodefrag)
+  arrowprogram = compileprogram(arrowvert, arrowfrag)
+  bgprogram = compileprogram(bgvert, bgfrag)
 
   glUseProgram(nodeprogram)
-  verts = createArray(2)
-  loadFloatArray(verts, nodeverts)
-  coordattr = applyvd(nodeprogram, verts, "coord", 2, 0)
+  vao1 = createVAO()
 
-  poss = createArray(3)
-  posattr = applyvdinstanced(nodeprogram, poss, "off", 3, 0)
+  verts = createArray(vao1, 2)
+  loadFloatArray(verts, nodeverts)
+  applyvd(nodeprogram, verts, "coord", 2, 0)
+
+  poss = createArray(vao1, 3)
+  applyvdinstanced(nodeprogram, poss, "off", 3, 0)
+
 
   glUseProgram(arrowprogram)
-  verts2 = createArray(2)
-  loadFloatArray(verts2, arrowverts)
-  coordattr2 = applyvd(arrowprogram, verts2, "coord", 2, 0)
+  vao2 = createVAO()
 
-  edgedata = createArray(7)
-  startattr = applyvdinstanced(arrowprogram, edgedata, "start", 3, 0)
-  endattr = applyvdinstanced(arrowprogram, edgedata, "end", 3, 3)
-  edgekindattr = applyvdinstanced(arrowprogram, edgedata, "edgekind", 1, 6)
+  verts2 = createArray(vao2, 2)
+  loadFloatArray(verts2, arrowverts)
+  applyvd(arrowprogram, verts2, "coord", 2, 0)
+
+  edgedata = createArray(vao2, 7)
+  applyvdinstanced(arrowprogram, edgedata, "start", 3, 0)
+  applyvdinstanced(arrowprogram, edgedata, "end", 3, 3)
+  applyvdinstanced(arrowprogram, edgedata, "edgekind", 1, 6)
 
   glUseProgram(bgprogram)
-  verts3 = createArray(2)
+  vao3 = createVAO()
+
+  verts3 = createArray(vao3, 2)
   loadFloatArray(verts3, bgverts)
-  coordattr3 = applyvd(bgprogram, verts3, "coord", 2, 0)
+  applyvd(bgprogram, verts3, "coord", 2, 0)
 
   # create a texture for pygame to render to
   screentexture = glGenTextures(1)
@@ -329,28 +344,27 @@ def run(vertices, graph, renderstate):
 
     # draw the screen texture to the screen
     glUseProgram(bgprogram)
+    glBindVertexArray(vao3)
+
     setint(bgprogram, 'img', screentexture)
 
-    glEnable(GL_TEXTURE_2D)
-    with glAttr(coordattr3):
-      glDrawArrays(GL_TRIANGLES, 0, 6)
-    glDisable(GL_TEXTURE_2D)
+    glDrawArrays(GL_TRIANGLES, 0, 6)
 
     # draw the nodes
     glUseProgram(nodeprogram)
+    glBindVertexArray(vao1)
     loadFloatArray(poss, pos, GL_DYNAMIC_DRAW)
     setmat4(nodeprogram, 'transform', transform)
 
-    with glAttr(coordattr), glAttr(posattr):
-      glDrawArraysInstanced(GL_TRIANGLES, 0, 6, len(pos))
+    glDrawArraysInstanced(GL_TRIANGLES, 0, 6, len(pos))
 
     # draw the edges
     glUseProgram(arrowprogram)
+    glBindVertexArray(vao2)
     loadFloatArray(edgedata, numpy.concatenate((pos[edges[:, 0]], pos[edges[:, 1]], edges[:, 2, numpy.newaxis].astype(numpy.float32)), axis = 1), GL_DYNAMIC_DRAW)
     setmat4(arrowprogram, 'transform', transform)
 
-    with glAttr(coordattr2), glAttr(startattr), glAttr(endattr), glAttr(edgekindattr):
-      glDrawArraysInstanced(GL_LINES, 0, 6, len(edges))
+    glDrawArraysInstanced(GL_LINES, 0, 6, len(edges))
 
     # refresh the display and wait for framerate
     pygame.display.flip()
