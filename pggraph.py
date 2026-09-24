@@ -23,7 +23,7 @@ pygame.display.gl_set_attribute(pygame.GL_CONTEXT_MINOR_VERSION, 3)
 pygame.display.gl_set_attribute(pygame.GL_CONTEXT_PROFILE_MASK, pygame.GL_CONTEXT_PROFILE_CORE)
 
 # spring layout parameters
-cs = 0.02
+cs = 0.1
 l = 0.1
 cr = 0.02
 
@@ -202,7 +202,7 @@ varying float f_nodekind;
 
 void main() {
   // draw the node with a size and orientation unaffected by the transform
-  gl_Position = vec4(off, 1.0) * transform * vec4(1, 1, 0.1, 1) + vec4(coord, 0, 0);
+  gl_Position = vec4(off, 1.0) * transform * vec4(1, 1, 0.01, 1) + vec4(coord, 0, 0) + vec4(0, 0, -0.5, 0);
   f_nodekind = nodekind;
 }
 """
@@ -245,13 +245,13 @@ varying float f_edgekind;
 
 void main() {
   // will need changes when i make this 3d
-  vec2 dir = normalize((vec4(end - start, 0) * transform).xy);
-  vec2 perp = vec2(dir.y, -dir.x);
+  vec3 dir = normalize((vec4(end - start, 0) * transform).xyz);
+  vec3 perp = normalize(vec3(dir.y, -dir.x, 0));
   // stretch the arrow to keep the arrowhead the same size
   if (coord.x < 0.5) {
-    gl_Position = vec4(start.xyz, 1.0) * transform * vec4(1, 1, 0.1, 1) + vec4((dir * coord.x + perp * coord.y) * 0.2, 0, 0);
+    gl_Position = vec4(start.xyz, 1.0) * transform * vec4(1, 1, 0.01, 1) + vec4((dir * coord.x + perp * coord.y) * 0.2, 0) + vec4(0, 0, -0.5, 0);
   } else {
-    gl_Position = vec4(end.xyz, 1.0) * transform * vec4(1, 1, 0.1, 1) + vec4((dir * (coord.x - 1) + perp * coord.y) * 0.2, 0, 0);
+    gl_Position = vec4(end.xyz, 1.0) * transform * vec4(1, 1, 0.01, 1) + vec4((dir * (coord.x - 1) + perp * coord.y) * 0.2, 0) + vec4(0, 0, -0.5, 0);
   }
   f_edgekind = edgekind;
 }
@@ -331,7 +331,18 @@ writeonly restrict buffer Pos2 {
 };
 
 vec3 calcforce(vec3 pos1, vec3 pos2, float strength) {
-  return vec3(0.001, 0.001, 0.001);
+  vec3 disp = pos1 - pos2;
+  float dist = length(disp);
+  if (dist < 0.0001) {
+    return vec3(0);
+  }
+  vec3 dir = disp / dist;
+  float fattr = -clamp(log(dist / l), -1, 1);
+  if (isnan(fattr) || isinf(fattr)) {
+    fattr = 0;
+  }
+  float frep = 1 / (dist * dist);
+  return (cs * strength * fattr + cr * frep) * dir;
 }
 
 void main() {
@@ -341,11 +352,46 @@ void main() {
   }
   vec3 posi = pos1[i];
   vec3 pos = pos1[i];
-  for (int j = 0; j < size; j++) {
+  for (uint j = 0; j < size; j++) {
     vec3 posj = pos1[j];
-    pos += calcforce(posi, posj, /*edgestrength[i * size + j]*/0);
+    pos += calcforce(posi, posj, edgestrength[i * size + j]);
   }
   pos2[i] = pos;
+}
+"""
+
+edgecompute = """
+#version 430
+
+layout(local_size_x = 128) in;
+
+uniform int size;
+
+readonly restrict buffer Edges {
+  vec2 edges[];
+};
+
+readonly restrict buffer Pos {
+  vec3 pos[];
+};
+
+struct edge {
+  vec3 start;
+  vec3 end;
+  float kind;
+};
+
+writeonly restrict buffer EdgePos {
+  edge edgepos[];
+};
+
+void main() {
+  uint i = gl_GlobalInvocationID.x;
+  if (i >= size) {
+    return;
+  }
+  edgepos[i].start = pos[int(floor(edges[i].x + 0.5))];
+  edgepos[i].end = pos[int(floor(edges[i].y + 0.5))];
 }
 """
 
@@ -373,12 +419,14 @@ def run(vertices, graph, kinds, renderstate):
   pygame.display.set_mode(size, pygame.locals.DOUBLEBUF | pygame.locals.OPENGL)
 
   glClearColor(0.0, 0.0, 0.0, 0.0)
+  glEnable(GL_DEPTH_TEST)
 
   # compile the programs and set up their geometry and attributes
   nodeprogram = compileprogram(nodevert, nodefrag)
   arrowprogram = compileprogram(arrowvert, arrowfrag)
   bgprogram = compileprogram(bgvert, bgfrag)
   forceprogram = compilecomputeprogram(forcecompute)
+  edgeprogram = compilecomputeprogram(edgecompute)
 
   with nodeprogram:
     nodecoords = VertexBuffer.new_data(nodeverts)
@@ -403,10 +451,10 @@ def run(vertices, graph, kinds, renderstate):
     with arrowvao:
       VertexBuffer.new_data(arrowverts).applyvd(arrowprogram.attr("coord"), 2, 0)
 
-      edgedata = VertexBuffer.new(7)
+      edgedata = VertexBuffer.new(8)
       edgedata.applyvdinstanced(arrowprogram.attr("start"), 3, 0)
-      edgedata.applyvdinstanced(arrowprogram.attr("end"), 3, 3)
-      edgedata.applyvdinstanced(arrowprogram.attr("edgekind"), 1, 6)
+      edgedata.applyvdinstanced(arrowprogram.attr("end"), 3, 4)
+      edgedata.applyvdinstanced(arrowprogram.attr("edgekind"), 1, 7)
 
   with bgprogram:
     bgvao = createVAO()
@@ -418,8 +466,21 @@ def run(vertices, graph, kinds, renderstate):
     setfloat(forceprogram.uniform('cr'), cr)
     setfloat(forceprogram.uniform('l'), l)
 
-    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "pos1"), 0)
-    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "pos2"), 1)
+    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "Pos1"), 0)
+    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "Pos2"), 1)
+    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "EdgeStrength"), 2)
+
+    edgestrength = VertexBuffer.new_data(numpy.where(mask[:, :, 0], 0.0, 1.0).flatten()[:, numpy.newaxis].astype(numpy.float32))
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, edgestrength.name)
+
+  with edgeprogram:
+    glShaderStorageBlockBinding(edgeprogram.name, glGetProgramResourceIndex(edgeprogram.name, GL_SHADER_STORAGE_BLOCK, "Edges"), 3)
+    glShaderStorageBlockBinding(edgeprogram.name, glGetProgramResourceIndex(edgeprogram.name, GL_SHADER_STORAGE_BLOCK, "Pos"), 1)
+    glShaderStorageBlockBinding(edgeprogram.name, glGetProgramResourceIndex(edgeprogram.name, GL_SHADER_STORAGE_BLOCK, "EdgePos"), 5)
+
+    edgesbuffer = VertexBuffer.new_data(edges[:, 0:2].astype(numpy.float32))
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, edgesbuffer.name)
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, edgedata.name)
 
   # create a texture for pygame to render to
   screentexture = glGenTextures(1)
@@ -442,6 +503,12 @@ def run(vertices, graph, kinds, renderstate):
   poss2.loadFloatArray(numpy.concatenate((
     pos,
     pos[:, 1, numpy.newaxis],
+  ), axis = 1), GL_DYNAMIC_DRAW)
+  edgedata.loadFloatArray(numpy.concatenate((
+    pos[edges[:, 0]],
+    edges[:, 2, numpy.newaxis].astype(numpy.float32),
+    pos[edges[:, 1]],
+    edges[:, 2, numpy.newaxis].astype(numpy.float32),
   ), axis = 1), GL_DYNAMIC_DRAW)
 
   while True:
@@ -481,10 +548,18 @@ def run(vertices, graph, kinds, renderstate):
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, poss2.name)
 
     # how do i swap the buffers ?
-    with forceprogram, bgvao:
+    with forceprogram:
       setint(forceprogram.uniform('size'), len(pos))
 
       glDispatchCompute(len(pos) // 128 + 1, 1, 1)
+
+      glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT)
+
+    # how do i swap the buffers ?
+    with edgeprogram:
+      setint(edgeprogram.uniform('size'), len(edges))
+
+      glDispatchCompute(len(edges) // 128 + 1, 1, 1)
 
       glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT)
 
@@ -493,18 +568,13 @@ def run(vertices, graph, kinds, renderstate):
     with nodeprogram, nodevao1 as nodevao:
       #poss1.loadFloatArray(pos, GL_DYNAMIC_DRAW)
       #poss2.loadFloatArray(pos, GL_DYNAMIC_DRAW)
-      nodekinds.loadFloatArray(kinds[:, numpy.newaxis], GL_DYNAMIC_DRAW)
+      nodekinds.loadFloatArray(kinds[:, numpy.newaxis].astype(numpy.float32), GL_DYNAMIC_DRAW)
       setmat4(nodeprogram.uniform('transform'), transform)
 
       glDrawArraysInstanced(GL_TRIANGLES, 0, 6, len(pos))
 
     # draw the edges
     with arrowprogram, arrowvao:
-      edgedata.loadFloatArray(numpy.concatenate((
-        pos[edges[:, 0]],
-        pos[edges[:, 1]],
-        edges[:, 2, numpy.newaxis].astype(numpy.float32),
-      ), axis = 1), GL_DYNAMIC_DRAW)
       setmat4(nodeprogram.uniform('transform'), transform)
 
       glDrawArraysInstanced(GL_LINES, 0, 6, len(edges))
@@ -519,22 +589,6 @@ def run(vertices, graph, kinds, renderstate):
         pass
       else:
         savedpos = pos[pressedi].copy()
-
-    # node physics
-    # TIME: O(n^2) # maybe make a compute shader?
-    disps = pos[numpy.newaxis, :, :] - pos[:, numpy.newaxis, :] # displacement
-    dist2s = numpy.sum(disps ** 2, axis = 2) # distance squared
-    dists = numpy.sqrt(dist2s) # distance
-    dirs = disps / dists[:, :, numpy.newaxis] # unit vector of displacement
-    
-    # attraction proportional to log(distance / length)
-    fattrs = numpy.ma.MaskedArray(-numpy.clip(numpy.nan_to_num(cs * numpy.log(dists[:, :, numpy.newaxis] / l), -1, 1) * dirs), mask).filled(0)
-    # repulsion proportional to the inverse square
-    freps = numpy.nan_to_num(cr / dist2s[:, :, numpy.newaxis] * dirs)
-    
-    # despite being labelled "force", they are actually velocity
-    fs = fattrs + freps
-    #pos += fs.sum(0) # sum over axis 0
 
     # mouse position and mouse movement
     mpos = glm.vec2(pygame.mouse.get_pos()) / size * 2 - 1
