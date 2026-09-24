@@ -182,12 +182,12 @@ class VertexAttribute(collections.namedtuple('VertexAttribute', ['array', 'name'
 
 # the shader and geometry for the graph nodes
 nodeverts = numpy.array([
-  [-0.02, -0.02],
-  [-0.02,  0.02],
-  [ 0.02,  0.02],
-  [ 0.02, -0.02],
-  [-0.02, -0.02],
-  [ 0.02,  0.02],
+  [-0.01, -0.01],
+  [-0.01,  0.01],
+  [ 0.01,  0.01],
+  [ 0.01, -0.01],
+  [-0.01, -0.01],
+  [ 0.01,  0.01],
 ], dtype = numpy.float32)
 
 nodevert = """
