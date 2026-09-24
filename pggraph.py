@@ -80,6 +80,9 @@ class Program(collections.namedtuple('Program', ['name'])):
   def attr(self, name):
     return glGetAttribLocation(self.name, name)
 
+  def bindssb(self, name, index):
+    glShaderStorageBlockBinding(self.name, glGetProgramResourceIndex(self.name, GL_SHADER_STORAGE_BLOCK, name), index)
+
   def __enter__(self):
     self._last = glGetIntegerv(GL_CURRENT_PROGRAM)
     self.use()
@@ -132,6 +135,12 @@ class VertexBuffer(collections.namedtuple('VertexBuffer', ['name', 'size'])):
   def new_data(data, kind = GL_STATIC_DRAW): # load data at construction
     count,size = data.shape
     return VertexBuffer.new(size).loadFloatArray(data, kind)
+
+  # allocate the memory for it but don't put any data
+  def declareFloatArray(self, count, kind = GL_STATIC_DRAW):
+    self.bind()
+    glBufferData(GL_ARRAY_BUFFER, count * self.size * sizeof(c_float), None, kind)
+    return self
 
   # load a 2d numpy array of floats into an array buffer
   # it must have the same number of floats per vertex
@@ -398,16 +407,20 @@ void main() {
 def run(vertices, graph, kinds, renderstate):
   # create a mask of which edges have attraction forces applied
   # and a list of edges
-  mask = numpy.full((len(graph), len(graph), 3), True, dtype = numpy.bool)
+  edgestrengthdata = numpy.full((len(graph), len(graph)), 0, dtype = numpy.float32)
   edges = []
+  edgekinds = []
   for i in graph:
     for j in graph[i]:
       if i == j:
         continue
-      mask[i, j] = mask[j, i] = False, False, False
-      edges.append((i, j, graph[i][j]))
+      edgestrengthdata[i, j] += 1
+      edgestrengthdata[j, i] += 1
+      edges.append((i, j))
+      edgekinds.append(graph[i][j])
 
-  edges = numpy.array(edges, dtype = numpy.int32).reshape((len(edges), 3))
+  edges = numpy.array(edges, dtype = numpy.int32).reshape((len(edges), 2))
+  edgekinds = numpy.array(edgekinds, dtype = numpy.int32).reshape((len(edges), 1))
 
   kinds = numpy.array([kinds[v] for v in vertices])
 
@@ -451,10 +464,12 @@ def run(vertices, graph, kinds, renderstate):
     with arrowvao:
       VertexBuffer.new_data(arrowverts).applyvd(arrowprogram.attr("coord"), 2, 0)
 
+      edgekindsdata = VertexBuffer.new(1)
+      edgekindsdata.applyvdinstanced(arrowprogram.attr("edgekind"), 1, 0)
+
       edgedata = VertexBuffer.new(8)
       edgedata.applyvdinstanced(arrowprogram.attr("start"), 3, 0)
       edgedata.applyvdinstanced(arrowprogram.attr("end"), 3, 4)
-      edgedata.applyvdinstanced(arrowprogram.attr("edgekind"), 1, 7)
 
   with bgprogram:
     bgvao = createVAO()
@@ -466,19 +481,19 @@ def run(vertices, graph, kinds, renderstate):
     setfloat(forceprogram.uniform('cr'), cr)
     setfloat(forceprogram.uniform('l'), l)
 
-    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "Pos1"), 0)
-    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "Pos2"), 1)
-    glShaderStorageBlockBinding(forceprogram.name, glGetProgramResourceIndex(forceprogram.name, GL_SHADER_STORAGE_BLOCK, "EdgeStrength"), 2)
+    forceprogram.bindssb("Pos1", 0)
+    forceprogram.bindssb("Pos2", 1)
+    forceprogram.bindssb("EdgeStrength", 2)
 
-    edgestrength = VertexBuffer.new_data(numpy.where(mask[:, :, 0], 0.0, 1.0).flatten()[:, numpy.newaxis].astype(numpy.float32))
+    edgestrength = VertexBuffer.new_data(edgestrengthdata)
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, edgestrength.name)
 
   with edgeprogram:
-    glShaderStorageBlockBinding(edgeprogram.name, glGetProgramResourceIndex(edgeprogram.name, GL_SHADER_STORAGE_BLOCK, "Edges"), 3)
-    glShaderStorageBlockBinding(edgeprogram.name, glGetProgramResourceIndex(edgeprogram.name, GL_SHADER_STORAGE_BLOCK, "Pos"), 1)
-    glShaderStorageBlockBinding(edgeprogram.name, glGetProgramResourceIndex(edgeprogram.name, GL_SHADER_STORAGE_BLOCK, "EdgePos"), 5)
+    edgeprogram.bindssb("Edges", 3)
+    edgeprogram.bindssb("Pos", 1)
+    edgeprogram.bindssb("EdgePos", 5)
 
-    edgesbuffer = VertexBuffer.new_data(edges[:, 0:2].astype(numpy.float32))
+    edgesbuffer = VertexBuffer.new_data(edges.astype(numpy.float32))
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, edgesbuffer.name)
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, edgedata.name)
 
@@ -496,20 +511,16 @@ def run(vertices, graph, kinds, renderstate):
 
   transform = glm.scale(glm.vec3(0.2, 0.2, 0.2)) * glm.rotate(0.5, glm.vec3(0, 0, 1)) # current transform
 
-  poss1.loadFloatArray(numpy.concatenate((
-    pos,
-    pos[:, 1, numpy.newaxis],
-  ), axis = 1), GL_DYNAMIC_DRAW)
+  poss1.declareFloatArray(len(pos), GL_DYNAMIC_DRAW)
   poss2.loadFloatArray(numpy.concatenate((
     pos,
     pos[:, 1, numpy.newaxis],
   ), axis = 1), GL_DYNAMIC_DRAW)
-  edgedata.loadFloatArray(numpy.concatenate((
-    pos[edges[:, 0]],
-    edges[:, 2, numpy.newaxis].astype(numpy.float32),
-    pos[edges[:, 1]],
-    edges[:, 2, numpy.newaxis].astype(numpy.float32),
+  edgedata.declareFloatArray(len(edges), GL_DYNAMIC_DRAW)
+  edgekindsdata.loadFloatArray(numpy.concatenate((
+    edgekinds.astype(numpy.float32),
   ), axis = 1), GL_DYNAMIC_DRAW)
+  nodekinds.loadFloatArray(kinds[:, numpy.newaxis].astype(numpy.float32), GL_DYNAMIC_DRAW)
 
   while True:
     screen.fill((0, 0, 0))
@@ -543,32 +554,9 @@ def run(vertices, graph, kinds, renderstate):
 
       glDrawArrays(GL_TRIANGLES, 0, 6)
 
-    poss2,poss1 = poss1,poss2
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, poss1.name)
-    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, poss2.name)
-
-    # how do i swap the buffers ?
-    with forceprogram:
-      setint(forceprogram.uniform('size'), len(pos))
-
-      glDispatchCompute(len(pos) // 128 + 1, 1, 1)
-
-      glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT)
-
-    # how do i swap the buffers ?
-    with edgeprogram:
-      setint(edgeprogram.uniform('size'), len(edges))
-
-      glDispatchCompute(len(edges) // 128 + 1, 1, 1)
-
-      glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT)
-
     # draw the nodes
-    nodevao2,nodevao1 = nodevao1,nodevao2
+    nodevao2,nodevao1 = nodevao1,nodevao2 # swap position buffers
     with nodeprogram, nodevao1 as nodevao:
-      #poss1.loadFloatArray(pos, GL_DYNAMIC_DRAW)
-      #poss2.loadFloatArray(pos, GL_DYNAMIC_DRAW)
-      nodekinds.loadFloatArray(kinds[:, numpy.newaxis].astype(numpy.float32), GL_DYNAMIC_DRAW)
       setmat4(nodeprogram.uniform('transform'), transform)
 
       glDrawArraysInstanced(GL_TRIANGLES, 0, 6, len(pos))
@@ -582,13 +570,26 @@ def run(vertices, graph, kinds, renderstate):
     # refresh the display and wait for framerate
     pygame.display.flip()
     pygame.time.wait(10)
+
+    poss2,poss1 = poss1,poss2 # swap position buffers
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, poss1.name)
+    glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, poss2.name)
     
     # save the position of the currently dragged node
     if pressedi is not None:
       if pressedi == -1:
         pass
       else:
-        savedpos = pos[pressedi].copy()
+        poss1.bind()
+        savedpos = glGetBufferSubData(GL_ARRAY_BUFFER, pressedi * 4 * sizeof(c_float), 3 * sizeof(c_float)).view('f')
+
+    # compute forces on vertices
+    with forceprogram:
+      setint(forceprogram.uniform('size'), len(pos))
+
+      glDispatchCompute(len(pos) // 128 + 1, 1, 1)
+
+      glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT) # make sure the changes are visible
 
     # mouse position and mouse movement
     mpos = glm.vec2(pygame.mouse.get_pos()) / size * 2 - 1
@@ -603,9 +604,21 @@ def run(vertices, graph, kinds, renderstate):
         transform = glm.translate(glm.vec3(dmpos, 0)) * transform
       else:
         # drag node
-        pos[pressedi] = savedpos + (glm.inverse(transform) * glm.vec4(dmpos, 0, 0)).xyz
+        newpos = savedpos + (glm.inverse(transform) * glm.vec4(dmpos, 0, 0)).xyz
+        poss2.bind()
+        glBufferSubData(GL_ARRAY_BUFFER, pressedi * 4 * sizeof(c_float), 3 * sizeof(c_float), newpos.view('b'))
 
-    if pygame.mouse.get_pressed()[2]: # right mouse
+    # move the edges
+    # could i just use the shader storage buffer
+    # hmm that would index twice for each vertex instead of twice for each edge
+    with edgeprogram:
+      setint(edgeprogram.uniform('size'), len(edges))
+
+      glDispatchCompute(len(edges) // 128 + 1, 1, 1)
+
+      glMemoryBarrier(GL_VERTEX_ATTRIB_ARRAY_BARRIER_BIT | GL_TEXTURE_FETCH_BARRIER_BIT) # make sure the changes are visible
+
+    if pygame.mouse.get_pressed()[2]: # right mouse - rotate view
       # cross mouse movement with 0 0 1
       # to get a rotation axis perpendicular to mouse movement
       # then the magnitude is the sin of some angle idk
@@ -619,8 +632,10 @@ def run(vertices, graph, kinds, renderstate):
     # TIME: O(n)
     mind = math.inf
     mini = None
-    for i,npos in enumerate(pos):
-      npost = transform * glm.vec4(npos, 1)
+    poss2.bind()
+    gpupos = glGetBufferSubData(GL_ARRAY_BUFFER, 0, len(pos) * 4 * sizeof(c_float)).view('f').reshape((-1, 4))
+    for i,npos in enumerate(gpupos):
+      npost = transform * glm.vec4(npos[:3], 1)
       np = npost.xy / npost.w
       if sum((mpos - np) ** 2) < mind:
         mini = i

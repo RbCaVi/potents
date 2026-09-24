@@ -144,6 +144,19 @@ tuple('''
 '''.strip('\n').split('\n')),
 ), nextstates)
 
+"""
+fullgraph = traverse((
+  (1, 1),
+tuple('''
+#####
+#  ##
+##o##
+##  #
+#####
+'''.strip('\n').split('\n')),
+), nextstates)
+"""
+
 vertices,graph = toindexes(fullgraph)
 
 kinds = classify(fullgraph, classify1)
@@ -153,8 +166,8 @@ cvertices,cgraph = toindexes(collapsedgraph)
 
 ckinds = classify(collapsedgraph, classify2)
 
-print(vertices, graph, kinds)
-print(cvertices, cgraph, ckinds)
+#print(vertices, graph, kinds)
+#print(cvertices, cgraph, ckinds)
 
 import pggraph
 
