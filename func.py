@@ -41,33 +41,40 @@ class Mem(collections.namedtuple('Mem', ['ctx', 'key'])):
 	def value(self):
 		return self.ctx.memtable[self.key]
 
-class TraceContext(collections.namedtuple('TraceContext', ['address', 'memtable', 'functable'])):
+class Context:
+	def __init__(self, address, memtable, functable):
+		self.address = address
+		self.memtable = {**memtable}
+		self.functable = functable
+
+	def copy(self):
+		return Context(self.address, self.memtable, self.functable)
+
 	def new(functable):
-		return TraceContext(0, frozendict.frozendict(), deepfreeze(functable))
+		return Context(itertools.count(0), {}, functable)
 
 	def newmem(self):
-		ctx = self._replace(address = self.address + 1)
-		mem = Mem(ctx, ctx.address)
-		ctx,mem = self.set(mem, None)
-		return ctx, mem
+		mem = Mem(self, next(self.address))
+		_self,mem = self.set(mem, None)
+		return self, mem
 
 	def set(self, mem, val):
-		ctx = self._replace(memtable = self.memtable | {mem.key: val})
-		return ctx, mem._replace(ctx = ctx)
+		self.memtable[mem.key] = val
+		return self, mem
 
 def op_add(ctx, v3, v1, v2):
-	return ctx, v1 + v2, v1, v2,
+	return v1 + v2, v1, v2,
 
 def op_malloc(ctx, v):
 	ctx,mem = ctx.newmem()
-	return ctx, mem,
+	return mem,
 
 def op_setmem(ctx, v, val):
 	ctx,v = ctx.set(v, val)
-	return ctx, v, val,
+	return v, val,
 
 def op_getmem(ctx, val, v):
-	return ctx, v.value, v,
+	return v.value, v,
 
 optable = {
 	'add': op_add,
@@ -105,7 +112,8 @@ def call(ctx, f, args, log = lambda x: None):
 					del variables[name]
 				case ('op', op, args):
 					log(('op', op, args))
-					ctx,*newvals = optable[op](ctx, *(variables[name] for name in args))
+					newvals = optable[op](ctx, *(variables[name] for name in args))
+					print(args, newvals)
 					for name,newval in zip(args, newvals):
 						variables[name] = newval
 				case ('call', func, ret, args):
@@ -127,10 +135,11 @@ def call(ctx, f, args, log = lambda x: None):
 
 def trace(ctx, f, args):
 	log = [('call', f, '__OUT__', args)]
+	ctx1 = Context.copy(ctx)
 	ctx2, out = call(ctx, ctx.functable[f], args, log.append)
-	return ctx, args, log, ctx2, out
+	return ctx1, args, log, ctx2, out
 
-ctx = TraceContext.new({
+ctx = Context.new({
 	'f1': (
 		'begin', # initial block
 		{
@@ -182,14 +191,14 @@ ctx = TraceContext.new({
 	)
 })
 
-trace1 = trace(ctx, 'f1', [4, 6])
+#trace1 = trace(ctx, 'f1', [4, 6])
 
-#trace2 = trace(ctx, 'f2', [4, 6])
+trace2 = trace(ctx, 'f2', [4, 6])
 
 #trace3 = trace(ctx, 'f2', [0, 6])
 
-print(trace1)
-#print(trace2)
+#print(trace1)
+print(trace2)
 #print(trace3)
 
 import pygame
@@ -203,37 +212,15 @@ clock = pygame.time.Clock()
 
 font = pygame.font.Font(None, 15)
 
-ctx,args,log,ctx2,out = trace1
+ctx,args,log,ctx2,out = trace2
 
 loglines = iter(log)
 
 logdisp = pygame.Surface((0, 0))
 
-class RunContext:
-	def __init__(self, tctx):
-		self.address = itertools.count(tctx.address)
-		self.memtable = {**tctx.memtable}
-		self.functable = tctx.functable
-
-	def newmem(self):
-		mem = Mem(self, next(self.address))
-		_self,mem = self.set(mem, None)
-		return self, mem
-
-	def set(self, mem, val):
-		self.memtable[mem.key] = val
-		return self, mem
-
 stack = [[None, None, {'__OUT__': None}]]
 
-def op_setmem(ctx, v, val):
-	ctx,v = ctx.set(v, val)
-	return ctx, v, val,
-
-def op_getmem(ctx, val, v):
-	return ctx, v.value, v,
-
-context = RunContext(ctx)
+context = Context.copy(ctx)
 
 while True:
 	for event in pygame.event.get():
@@ -249,12 +236,14 @@ while True:
 					phivals = args
 				case ('enterblock', block, phivars):
 					stack[-1][2] = {var:val for var,val in zip(phivars, phivals)}
+				case ('exitblock', phivars):
+					phivals = [stack[-1][2][var] for var in phivars]
 				case ('addvar', name):
 					stack[-1][2][name] = None
 				case ('delvar', name):
 					del stack[-1][2][name]
 				case ('op', name, args):
-					_context,*newvals = optable[name](context, *(stack[-1][2][name] for name in args))
+					newvals = optable[name](context, *(stack[-1][2][name] for name in args))
 					for name,newval in zip(args, newvals):
 						stack[-1][2][name] = newval
 				case ('return', name):
@@ -268,8 +257,8 @@ while True:
 		if event.type == pygame.MOUSEBUTTONUP:
 			pass
 	display.fill((255, 255, 255))
-	# draw everything in the stack except the top "frame"
 	y = 5
+	arrows = []
 	for frame in stack[0:]:
 		f,_,variables = frame
 		display.blit(font.render(f, True, (0, 0, 0)), (5, y))
@@ -278,9 +267,28 @@ while True:
 		y += 5
 		for var,val in variables.items():
 			display.blit(font.render(str(var), True, (0, 0, 0)), (20, y))
-			display.blit(font.render(str(val), True, (0, 0, 0)), (100, y))
+			if isinstance(val, Mem):
+				rect = display.blit(font.render(str(val.value), True, (0, 0, 0)), (100, y))
+				arrows.append((rect, val.key))
+			else:
+				display.blit(font.render(str(val), True, (0, 0, 0)), (100, y))
 			y += 15
 		y += 5
+	y = 5
+	mems = {}
+	for i,val in context.memtable.items():
+		rect = display.blit(font.render(str(i), True, (0, 0, 0)), (200, y))
+		display.blit(font.render(str(val), True, (0, 0, 0)), (220, y))
+		mems[i] = rect
+		y += 15
+	x = 150
+	for srect,dest in arrows:
+		begin = srect.midright
+		end = mems[dest].midleft
+		pygame.draw.line(display, (255, 0, 0), begin, (x, begin[1]), width = 2) 
+		pygame.draw.line(display, (255, 0, 0), (x, begin[1]), (x, end[1]), width = 2) 
+		pygame.draw.line(display, (255, 0, 0), (x, end[1]), end, width = 2)
+		x += 5 
 	display.blit(logdisp, (0, 0))
 	pygame.display.flip()
 	clock.tick(60)
