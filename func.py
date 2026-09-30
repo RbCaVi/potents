@@ -268,48 +268,44 @@ class RelAnchor(Anchor):
 		return self.parent.pos + self.rel
 
 class Object:
-	def __init__(self, anchor):
-		self.anchor = anchor
+	def __init__(self):
+		pass
 
-	def draw(self, surface):
+	def draw(self, surface, anchor):
 		pass
 
 	def update(self):
 		pass
 
-	@property
-	def pos(self):
-		return self.anchor.pos
-
 class ContainerObject(Object):
-	def __init__(self, anchor, children):
-		super().__init__(anchor)
+	def __init__(self, children):
+		super().__init__()
 		self.children = []
 		for child in children:
 			self.addchild(child)
 
-	def addchild(self, child):
-		assert isinstance(child.anchor, RelAnchor)
-		child.anchor.parent = self.anchor
-		self.children.append(child)
+	def addchild(self, child, anchor):
+		assert isinstance(anchor, RelAnchor)
+		self.children.append((child, anchor))
 
-	def draw(self, surface):
-		for child in self.children:
-			child.draw(surface)
+	def draw(self, surface, anchor):
+		for child,canchor in self.children:
+			canchor.parent = anchor
+			child.draw(surface, canchor)
 
 	def update(self):
 		for child in self.children:
 			child.update()
 
 class Stack(ContainerObject):
-	def __init__(self, anchor, retvar):
-		super().__init__(anchor, [])
+	def __init__(self, retvar):
+		super().__init__([])
 		self.bottom = 0
-		self.addchild(StackFrame(RelAnchor(Vec(0, 0)), None, None, {retvar: None}))
+		self.addchild(StackFrame(None, None, {retvar: None}), RelAnchor(Vec(0, 0)))
 
 	def pushframe(self, f, retvar, variables):
 		self.bottom += self.top.height()
-		self.addchild(StackFrame(RelAnchor(Vec(0, self.bottom)), f, retvar, variables))
+		self.addchild(StackFrame(f, retvar, variables), RelAnchor(Vec(0, self.bottom)))
 
 	def popframe(self):
 		self.children.pop()
@@ -317,17 +313,17 @@ class Stack(ContainerObject):
 
 	@property
 	def top(self):
-		return self.children[-1]
+		return self.children[-1][0]
 
 class StackFrame(Object):
-	def __init__(self, anchor, f, retvar, variables):
-		super().__init__(anchor)
+	def __init__(self, f, retvar, variables):
+		super().__init__()
 		self.f = f
 		self.retvar = retvar
 		self.variables = variables
 
-	def draw(self, surface):
-		ptr = self.pos
+	def draw(self, surface, anchor):
+		ptr = anchor.pos
 		surface.blit(font.render(self.f, True, (0, 0, 0)), ptr + (5, 5))
 		pygame.draw.rect(surface, (0, 0, 255), (ptr + (10, 20), (5, 5 + len(self.variables) * 15)))
 		ptr += (0, 25)
@@ -358,7 +354,7 @@ logdisp = pygame.Surface((0, 0))
 
 context = Context.copy(ctx)
 
-stack = Stack(AbsAnchor(Pos(0, 0)), '__OUT__')
+stack = Stack('__OUT__')
 
 while True:
 	for event in pygame.event.get():
@@ -398,7 +394,7 @@ while True:
 			pass
 	display.fill((255, 255, 255))
 	arrows = []
-	stack.draw(display)
+	stack.draw(display, AbsAnchor(Pos(0, 0)))
 	y = 5
 	mems = {}
 	for i,val in context.memtable.items():
