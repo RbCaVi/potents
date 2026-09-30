@@ -205,6 +205,144 @@ import pygame
 import sys
 import math
 
+class Pos(collections.namedtuple('Pos', ['x', 'y'])):
+	def __add__(self, that):
+		x,y = self
+		match that:
+			case Vec(x = dx, y = dy) | (dx, dy):
+				return Pos(x + dx, y + dy)
+		return NotImplemented
+
+	def __sub__(self, that):
+		x,y = self
+		match that:
+			case Vec(x = dx, y = dy) | (dx, dy):
+				return Pos(x - dx, y - dy)
+			case Pos(x = x2, y = y2):
+				return Vec(x - x2, y - y2)
+		return NotImplemented
+
+class Vec(collections.namedtuple('Pos', ['x', 'y'])):
+	def __add__(self, that):
+		x,y = self
+		match that:
+			case Vec(x = dx, y = dy):
+				return Vec(x + dx, y + dy)
+			case Pos(x = x2, y = y2):
+				return Pos(x + x2, y + y2)
+		return NotImplemented
+
+	def __sub__(self, that):
+		x,y = self
+		match that:
+			case Vec(x = dx, y = dy):
+				return Vec(x - dx, y - dy)
+			case Pos(x = x2, y = y2):
+				return Pos(x - x2, y - y2)
+		return NotImplemented
+
+class Anchor:
+	@property
+	def pos(self):
+		raise NotImplementedError
+
+class AbsAnchor(Anchor):
+	def __init__(self, pos):
+		self.pos = pos
+
+	@property
+	def pos(self):
+		return self._pos
+
+	@pos.setter
+	def pos(self, pos):
+		self._pos = Pos(*pos)
+
+class RelAnchor(Anchor):
+	def __init__(self, rel, parent = None):
+		self.parent = parent
+		self.rel = rel
+
+	@property
+	def pos(self):
+		return self.parent.pos + self.rel
+
+class Object:
+	def __init__(self, anchor):
+		self.anchor = anchor
+
+	def draw(self, surface):
+		pass
+
+	def update(self):
+		pass
+
+	@property
+	def pos(self):
+		return self.anchor.pos
+
+class ContainerObject(Object):
+	def __init__(self, anchor, children):
+		super().__init__(anchor)
+		self.children = []
+		for child in children:
+			self.addchild(child)
+
+	def addchild(self, child):
+		assert isinstance(child.anchor, RelAnchor)
+		child.anchor.parent = self.anchor
+		self.children.append(child)
+
+	def draw(self, surface):
+		for child in self.children:
+			child.draw(surface)
+
+	def update(self):
+		for child in self.children:
+			child.update()
+
+class Stack(ContainerObject):
+	def __init__(self, anchor, retvar):
+		super().__init__(anchor, [])
+		self.bottom = 0
+		self.addchild(StackFrame(RelAnchor(Vec(0, 0)), None, None, {retvar: None}))
+
+	def pushframe(self, f, retvar, variables):
+		self.bottom += self.top.height()
+		self.addchild(StackFrame(RelAnchor(Vec(0, self.bottom)), f, retvar, variables))
+
+	def popframe(self):
+		self.children.pop()
+		self.bottom -= self.top.height()
+
+	@property
+	def top(self):
+		return self.children[-1]
+
+class StackFrame(Object):
+	def __init__(self, anchor, f, retvar, variables):
+		super().__init__(anchor)
+		self.f = f
+		self.retvar = retvar
+		self.variables = variables
+
+	def draw(self, surface):
+		ptr = self.pos
+		surface.blit(font.render(self.f, True, (0, 0, 0)), ptr + (5, 5))
+		pygame.draw.rect(surface, (0, 0, 255), (ptr + (10, 20), (5, 5 + len(self.variables) * 15)))
+		ptr += (0, 25)
+		for var,val in self.variables.items():
+			surface.blit(font.render(str(var), True, (0, 0, 0)), ptr + (20, 0))
+			if isinstance(val, Mem):
+				rect = surface.blit(font.render(str(val.value), True, (0, 0, 0)), ptr + (100, 0))
+				arrows.append((rect, val.key))
+			else:
+				surface.blit(font.render(str(val), True, (0, 0, 0)), ptr + (100, 0))
+			ptr += (0, 15)
+
+	def height(self):
+		return 25 + 15 * len(self.variables)
+
 pygame.init()
 
 display = pygame.display.set_mode((640, 480), pygame.RESIZABLE)
@@ -218,9 +356,9 @@ loglines = iter(log)
 
 logdisp = pygame.Surface((0, 0))
 
-stack = [[None, None, {'__OUT__': None}]]
-
 context = Context.copy(ctx)
+
+stack = Stack(AbsAnchor(Pos(0, 0)), '__OUT__')
 
 while True:
 	for event in pygame.event.get():
@@ -232,24 +370,26 @@ while True:
 			print(logevent)
 			match logevent:
 				case ('call', f, ret, args):
-					stack.append([f, ret, {}])
+					stack.pushframe(f, ret, {})
 					phivals = args
 				case ('enterblock', block, phivars):
-					stack[-1][2] = {var:val for var,val in zip(phivars, phivals)}
+					stack.top.variables = {var:val for var,val in zip(phivars, phivals)}
 				case ('exitblock', phivars):
-					phivals = [stack[-1][2][var] for var in phivars]
+					phivals = [stack.top.variables[var] for var in phivars]
+					stack.top.variables = {}
 				case ('addvar', name):
-					stack[-1][2][name] = None
+					stack.top.variables[name] = None
 				case ('delvar', name):
-					del stack[-1][2][name]
+					del stack.top.variables[name]
 				case ('op', name, args):
-					newvals = optable[name](context, *(stack[-1][2][name] for name in args))
+					newvals = optable[name](context, *(stack.top.variables[name] for name in args))
 					for name,newval in zip(args, newvals):
-						stack[-1][2][name] = newval
+						stack.top.variables[name] = newval
 				case ('return', name):
-					retval = stack[-1][2][name]
-					_f,retvar,_variables = stack.pop()
-					stack[-1][2][retvar] = retval
+					retval = stack.top.variables[name]
+					retvar = stack.top.retvar
+					stack.popframe()
+					stack.top.variables[retvar] = retval
 				case _:
 					print('unrecognized')
 		if event.type == pygame.MOUSEMOTION:
@@ -257,23 +397,8 @@ while True:
 		if event.type == pygame.MOUSEBUTTONUP:
 			pass
 	display.fill((255, 255, 255))
-	y = 5
 	arrows = []
-	for frame in stack[0:]:
-		f,_,variables = frame
-		display.blit(font.render(f, True, (0, 0, 0)), (5, y))
-		y += 15
-		pygame.draw.rect(display, (0, 0, 255), (10, y, 5, 5 + len(variables) * 15))
-		y += 5
-		for var,val in variables.items():
-			display.blit(font.render(str(var), True, (0, 0, 0)), (20, y))
-			if isinstance(val, Mem):
-				rect = display.blit(font.render(str(val.value), True, (0, 0, 0)), (100, y))
-				arrows.append((rect, val.key))
-			else:
-				display.blit(font.render(str(val), True, (0, 0, 0)), (100, y))
-			y += 15
-		y += 5
+	stack.draw(display)
 	y = 5
 	mems = {}
 	for i,val in context.memtable.items():
