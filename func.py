@@ -118,7 +118,7 @@ def call(ctx, f, args, log = lambda x: None):
 						variables[name] = newval
 				case ('call', func, ret, args):
 					log(('call', func, ret, args))
-					ctx,ret.value = call(ctx, ctx.functable[func], args, log)
+					ctx,ret.value = call(ctx, ctx.functable[func], [variables[name] for name in args], log)
 				case _:
 					raise RuntimeError
 		ctrl,args,jumps = control
@@ -134,7 +134,7 @@ def call(ctx, f, args, log = lambda x: None):
 		phivars = [variables[name] for name in phinames]
 
 def trace(ctx, f, args):
-	log = [('call', f, '__OUT__', args)]
+	log = [('call', f, '__OUT__', [f'arg{i}' for i,arg in enumerate(args)])]
 	ctx1 = Context.copy(ctx)
 	ctx2, out = call(ctx, ctx.functable[f], args, log.append)
 	return ctx1, args, log, ctx2, out
@@ -302,10 +302,10 @@ class ContainerObject(Object):
 			child.update()
 
 class Stack(ContainerObject):
-	def __init__(self, anchor, retvar):
+	def __init__(self, anchor, retvar, args):
 		super().__init__(anchor, [])
 		self.bottom = 0
-		self.addchild(StackFrame(RelAnchor(Vec(0, 0)), None, None, {retvar: None}))
+		self.addchild(StackFrame(RelAnchor(Vec(0, 0)), None, None, {retvar: None, **{f'arg{i}':arg for i,arg in enumerate(args)}}))
 
 	def pushframe(self, f, retvar, variables):
 		self.bottom += self.top.height()
@@ -358,7 +358,7 @@ logdisp = pygame.Surface((0, 0))
 
 context = Context.copy(ctx)
 
-stack = Stack(AbsAnchor(Pos(0, 0)), '__OUT__')
+stack = Stack(AbsAnchor(Pos(0, 0)), '__OUT__', args)
 
 while True:
 	for event in pygame.event.get():
@@ -370,8 +370,8 @@ while True:
 			print(logevent)
 			match logevent:
 				case ('call', f, ret, args):
+					phivals = [stack.top.variables[name] for name in args]
 					stack.pushframe(f, ret, {})
-					phivals = args
 				case ('enterblock', block, phivars):
 					stack.top.variables = {var:val for var,val in zip(phivars, phivals)}
 				case ('exitblock', phivars):
