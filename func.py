@@ -360,9 +360,10 @@ context = Context.copy(ctx)
 
 stack = Stack(AbsAnchor(Pos(0, 0)), '__OUT__', args)
 
-framenames = (f'frame{i}' for i in itertools.count())
-
 lines = []
+
+lines.append(f'from animfuncs import *')
+lines.append(f'')
 
 while True:
 	for event in pygame.event.get():
@@ -374,6 +375,9 @@ while True:
 			except StopIteration:
 				for line in lines:
 					print(line)
+					with open('out/generated_anim.py', 'w') as f:
+						for line in lines:
+							print(line, file = f)
 				lines = []
 				continue
 			logdisp = font.render(str(logevent), True, (0, 0, 0))
@@ -384,44 +388,42 @@ while True:
 					stack.pushframe(f, ret, {})
 					_,block,phivars = next(loglines)
 					stack.top.variables = {var:val for var,val in zip(phivars, phivals)}
-					newframe = next(framenames)
-					lines.append(f'{newframe} = createFrame((100, {stack.top.anchor.pos.y}))')
-					for var in phivars:
-						lines.append(f'{newframe}.addvar({var!r})')
+					lines.append(f'frame = createFrame((100, {stack.top.anchor.pos.y}))')
 					for var,val in zip(phivars, args):
-						lines.append(f'src = stack.top.variables[{val!r}]')
-						lines.append(f'dest = {newframe}.variables[{var!r}]')
-						lines.append(f'animanchor = createInterp(src.anchor, dest.anchor)')
-						lines.append(f'src.copyat(animanchor)')
+						src = f'stack.top.variables[{val!r}]'
+						dest = f'frame.variables[{var!r}]'
+						lines.append(f'frame.addvar({var!r})')
+						lines.append(f'{dest} = {src}.copyat(createInterp({src}.anchor, {dest}.anchor))')
 					lines.append(f'awaitAnim()')
 					for var,val in zip(phivars, args):
-						lines.append(f'{newframe}.variables[{var!r}] = src')
-					lines.append(f'{newframe}.anchor = createInterp({newframe}.anchor, PosAnchor({stack.top.anchor.pos.x}, {stack.top.anchor.pos.y + stack.top.height()}))')
+						dest = f'frame.variables[{var!r}]'
+						lines.append(f'{dest}.anchor = {dest}.anchor.end')
+					lines.append(f'frame.anchor = createInterp(frame.anchor, PosAnchor({stack.top.anchor.pos.x}, {stack.top.anchor.pos.y + stack.top.height()}))')
 					lines.append(f'awaitAnim()')
-					lines.append(f'stack.push({newframe})')
+					lines.append(f'stack.push(frame)')
+					lines.append(f'del frame')
 				case ('exitblock', phivars):
 					phivals = [stack.top.variables[var] for var in phivars]
-					_,block,phivars = next(loglines)
-					stack.top.variables = {var:val for var,val in zip(phivars, phivals)}
-					newframe = next(framenames)
-					lines.append(f'{newframe} = createFrame((100, {stack.top.anchor.pos.y}))')
-					for var in phivars:
-						lines.append(f'{newframe}.addvar({var!r})')
-					for var,val in zip(phivars, args):
-						lines.append(f'src = stack.top.variables[{val!r}]')
-						lines.append(f'dest = {newframe}.variables[{var!r}]')
-						lines.append(f'src.anchor = createInterp(src.anchor, dest.anchor)')
+					_,block,phivars2 = next(loglines)
+					stack.top.variables = {var:val for var,val in zip(phivars2, phivals)}
+					lines.append(f'frame = createFrame((100, {stack.top.anchor.pos.y}))')
+					for var,val in zip(phivars, phivars2):
+						src = f'stack.top.variables[{val!r}]'
+						dest = f'frame.variables[{var!r}]'
+						lines.append(f'frame.addvar({var!r})')
+						lines.append(f'{src}.anchor = createInterp({src}.anchor, {dest}.anchor)')
 					lines.append(f'awaitAnim()')
-					lines.append(f'{newframe}.anchor = createInterp({newframe}.anchor, stack.top.anchor)')
+					lines.append(f'frame.anchor = createInterp(frame.anchor, stack.top.anchor)')
 					lines.append(f'awaitAnim()')
 					lines.append(f'stack.pop()')
-					lines.append(f'stack.push({newframe})')
+					lines.append(f'stack.push(frame)')
+					lines.append(f'del frame')
 				case ('addvar', name):
 					stack.top.variables[name] = None
-					lines.append(f'stack.top.addvar({var!r})')
+					lines.append(f'stack.top.addvar({name!r})')
 				case ('delvar', name):
 					del stack.top.variables[name]
-					lines.append(f'stack.top.delvar({var!r})')
+					lines.append(f'stack.top.delvar({name!r})')
 				case ('op', opname, args):
 					newvals = optable[opname](context, *(stack.top.variables[name] for name in args))
 					for name,newval in zip(args, newvals):
@@ -430,6 +432,7 @@ while True:
 					for name in args:
 						lines.append(f'  stack.top.variables[{name!r}],')
 					lines.append(f')')
+					lines.append(f'awaitAnim()')
 				case ('return', name):
 					retval = stack.top.variables[name]
 					retvar = stack.top.retvar
@@ -437,9 +440,11 @@ while True:
 					stack.top.variables[retvar] = retval
 					lines.append(f'src = stack.top.variables[{name!r}]')
 					lines.append(f'dest = stack[-2].variables[{retvar!r}]')
-					lines.append(f'stack.top.variables[{name!r}].anchor = createReturnInterp(src.anchor, dest.anchor)')
+					lines.append(f'stack.top.variables[{name!r}].anchor = createInterp(src.anchor, dest.anchor)')
 					lines.append(f'awaitAnim()')
-					lines.append(f'stack[-2].variables[{retvar!r}] = src')
+					lines.append(f'stack.pop()')
+					lines.append(f'stack.top.variables[{retvar!r}] = src')
+					lines.append(f'del src, dest')
 				case _:
 					print('unrecognized')
 			lines.append(f'')
