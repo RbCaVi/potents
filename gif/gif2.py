@@ -1,4 +1,5 @@
 import collections
+import struct
 
 def readstruct(fmt, f):
 	return struct.unpack(fmt, f.read(struct.calcsize(fmt)))
@@ -98,7 +99,7 @@ class ImageBlock(collections.namedtuple('ImageBlock', ['pos', 'size', 'lct', 're
 			lct = None
 
 		lzwcodesize, = readstruct('<B', f)
-		blocks = readdatablocks(f)
+		blocks = DataBlocks.read(f)
 
 		return ImageBlock((x, y), (width, height), ColorTable(lct, lctsizebits, lctsorted), reserved, interlaced, lzwcodesize, blocks)
 
@@ -114,7 +115,7 @@ class ImageBlock(collections.namedtuple('ImageBlock', ['pos', 'size', 'lct', 're
 			writecolors(lctsizebits, f, lct)
 
 		writestruct('<B', f, lzwcodesize)
-		writedatablocks(f, blocks)
+		DataBlocks.write(f, blocks)
 
 class DataBlock(collections.namedtuple('DataBlock', ['data'])):
 	@property
@@ -136,18 +137,18 @@ class DataBlock(collections.namedtuple('DataBlock', ['data'])):
 class CommentExtensionBlock(collections.namedtuple('CommentExtensionBlock', ['data'])):
 	@staticmethod
 	def read(f):
-		blocks = readdatablocks(f)
+		blocks = DataBlocks.read(f)
 		return CommentExtensionBlock(blocks)
 
 	@staticmethod
 	def write(f, block):
 		blocks, = block
-		writedatablocks(f, blocks)
+		DataBlocks.write(f, blocks)
 
 class ApplicationExtensionBlock(collections.namedtuple('ApplicationExtensionBlock', ['appid', 'appauth', 'data'])):
 	@staticmethod
 	def read(f):
-		idblock,blocks = readdatablocks(f)
+		idblock,*blocks = DataBlocks.read(f).blocks
 		# not sure if the first block is required to have exactly 11 bytes
 		appid,appauth = struct.unpack('<8s3s', idblock.data)
 		# appid is the "application identifier" - usually 'NETSCAPE' for animated gifs
@@ -158,13 +159,13 @@ class ApplicationExtensionBlock(collections.namedtuple('ApplicationExtensionBloc
 	def write(f, block):
 		appid,appauth,blocks = block
 		blocks.insert(0, DataBlock(struct.pack('<8s3s', appid, appauth)))
-		writedatablocks(f, blocks)
+		DataBlocks.write(f, DataBlocks(blocks))
 
 class GraphicControlExtensionBlock(collections.namedtuple('GraphicControlExtensionBlock', ['delay', 'hastransparent', 'transparent', 'disposal', 'userinput', 'reserved'])):
 	@staticmethod
 	def read(f):
 		# not sure if only one block is allowed
-		datablock, = readdatablocks(f)
+		datablock, = DataBlocks.read(f).blocks
 		# not sure if the first block is required to have exactly 4 bytes
 		flags,delay,transparent = struct.unpack('<BHB', datablock.data)
 		hastransparent,userinput,disposal,reserved = unpackbits([1, 1, 3, 3], flags)
@@ -184,23 +185,31 @@ class GraphicControlExtensionBlock(collections.namedtuple('GraphicControlExtensi
 	def write(f, block):
 		delay,hastransparent,transparent,disposal,userinput,reserved = block
 		flags = packbits([1, 1, 3, 3], hastransparent, userinput, disposal, reserved)
-		writedatablocks(f, [DataBlock(struct.pack('<BHB', flags, delay, transparent))])
+		DataBlocks.write(f, DataBlocks([DataBlock(struct.pack('<BHB', flags, delay, transparent))]))
 
-class PlaintextExtensionBlock(collections.namedtuple('PlaintextExtensionBlock', ['pos', 'gridsize', 'charsize', 'fg', 'bg'])):
+class PlaintextExtensionBlock(collections.namedtuple('PlaintextExtensionBlock', ['pos', 'gridsize', 'charsize', 'fg', 'bg', 'blocks'])):
 	@staticmethod
 	def read(f):
-		datablock,blocks = readdatablocks(f)
+		datablock,*blocks = DataBlocks.read(f)
 		# not sure if the first block is required to have exactly 12 bytes
 		x,y,gridwidth,gridheight,charwidth,charheight,fg,bg = struct.unpack('<HHHHBBBB', datablock.data)
 		# x, y are the top left corner of the grid
 		# gridwidth, gridheight are the size of the text grid in pixels and should be a multiple of charwidth. charheight
 		# charwidth, charheight are the size of each character cell in the grid
-		return PlaintextExtensionBlock((x, y), (gridwidth, gridheight), (charwidth, charheight), fg, bg)
+		return PlaintextExtensionBlock((x, y), (gridwidth, gridheight), (charwidth, charheight), fg, bg, blocks)
 
 	@staticmethod
 	def write(f, block):
-		(x,y),(gridwidth,gridheight),(charwidth,charheight),fg,bg = block
-		writedatablocks(f, [DataBlock(struct.pack('<HHHHBBBB', x, y, gridwidth, gridheight, charwidth, charheight, fg, bg))])
+		(x,y),(gridwidth,gridheight),(charwidth,charheight),fg,bg,blocks = block
+		blocks.insert(0, DataBlock(struct.pack('<HHHHBBBB', x, y, gridwidth, gridheight, charwidth, charheight, fg, bg)))
+		DataBlocks.write(f, DataBlocks(blocks))
+
+class RawExtensionBlock(collections.namedtuple('RawExtensionBlock', ['ident', 'blocks'])):
+	@staticmethod
+	def write(f, block):
+		ident,blocks = block
+		f.write(bytes([ident]))
+		DataBlocks.write(f, blocks)
 
 def readgifblock(f):
 	match f.read(1)[0]:
@@ -215,7 +224,7 @@ def readgifblock(f):
 
 def writegifblock(f, block):
 	match block:
-		case CommentExtensionBlock() | ApplicationExtensionBlock() | GraphicControlExtensionBlock() | PlaintextExtensionBlock():
+		case CommentExtensionBlock() | ApplicationExtensionBlock() | GraphicControlExtensionBlock() | PlaintextExtensionBlock() | RawExtensionBlock():
 			f.write(bytes([0x21]))
 			writeextensionblock(f, block)
 		case ImageBlock():
@@ -226,18 +235,21 @@ def writegifblock(f, block):
 		case b:
 			raise RuntimeError(f'unrecognized GIF block type: {type(block)}')
 
-def readdatablocks(f):
-	blocks = []
-	while True:
-		block = DataBlock.read(f)
-		if block.size == 0:
-			return blocks
-		blocks.append(block)
+class DataBlocks(collections.namedtuple('DataBlocks', ['blocks'])):
+	@staticmethod
+	def read(f):
+		blocks = []
+		while True:
+			block = DataBlock.read(f)
+			if block.size == 0:
+				return DataBlocks(blocks)
+			blocks.append(block)
 
-def writedatablocks(f, blocks):
-	for block in blocks:
-		DataBlock.write(f, block)
-	DataBlock.write(f, DataBlock(b''))
+	@staticmethod
+	def write(f, blocks):
+		for block in blocks.blocks:
+			DataBlock.write(f, block)
+		DataBlock.write(f, DataBlock(b''))
 
 def readextensionblock(f):
 	match f.read(1)[0]:
@@ -266,13 +278,15 @@ def writeextensionblock(f, block):
 		case PlaintextExtensionBlock():
 			f.write(bytes([0x01]))
 			PlaintextExtensionBlock.write(f, block)
+		case RawExtensionBlock():
+			RawExtensionBlock.write(f, block)
 		case b:
 			raise RuntimeError(f'unrecognized GIF block type: {type(block)}')
 
 def readgifblocks(f):
 	blocks = []
 	while True:
-		block = readdgifblock(f)
+		block = readgifblock(f)
 		if block == EndBlock():
 			return blocks
 		blocks.append(block)
@@ -282,12 +296,15 @@ def writegifblocks(f, blocks):
 		writegifblock(f, block)
 	writegifblock(f, EndBlock())
 
-def readgif(f):
-	header = GIFHeader.read(f)
-	blocks = readdgifblocks(f)
-	return GIF(header, blocks)
+class GIF(collections.namedtuple('GIF', ['header', 'blocks'])):
+	@staticmethod
+	def read(f):
+		header = GIFHeader.read(f)
+		blocks = readgifblocks(f)
+		return GIF(header, blocks)
 
-def writegif(f, gif):
-	header,blocks = gif
-	GIFHeader.write(f, header)
-	writegifblocks(blocks)
+	@staticmethod
+	def write(f, gif):
+		header,blocks = gif
+		GIFHeader.write(f, header)
+		writegifblocks(f, blocks)
