@@ -251,6 +251,10 @@ class DataBlocks(collections.namedtuple('DataBlocks', ['blocks'])):
 			DataBlock.write(f, block)
 		DataBlock.write(f, DataBlock(b''))
 
+	@property
+	def data(self):
+		return b''.join(block.data for block in self.blocks)
+
 def readextensionblock(f):
 	match f.read(1)[0]:
 		case 0xFE:
