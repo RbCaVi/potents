@@ -78,7 +78,7 @@ def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 	RESET = 1 << (initialcodesize - 1) # code that resets the dictionary
 	END = RESET + 1 # code to mark the end of the LZW data stream
 
-	codeoptions = [] # list of (code, chars since decoded (inclusive), dictionary, dictionary size when decoded)
+	codeoptions = collections.deque() # list of (code, chars since decoded (inclusive), dictionary, dictionary size when decoded)
 
 	dictionary = [[None] for i in range(1 << (initialcodesize - 1))] + [[], [None]]
 
@@ -87,19 +87,13 @@ def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 	for code in codes:
 		if code == END:
 			for code2,chars,dictionary2,length in codeoptions: # drain
-				chars.append(None)
-				prefixes = [code for code,word in enumerate(dictionary2[:length]) if word == chars[:len(word)]]
-				prefixes2 = [(code, word) for code,word in enumerate(dictionary2[:length]) if word == chars[:len(word)]]
-				#print('p', prefixes2, code2, file = fileout1)
+				prefixes = [code for code,word in enumerate(dictionary2) if code < length and word == chars[:len(word)]]
 				index = prefixes.index(code2)
 				length = len(prefixes)
-				# print it or something idk
-				#print('c', chars, prefixes, index, length, file = fileout1)
 				report(index, length)
 			return # CONCEAL: extra codes can be added after the END code
 		if lastcode != RESET:
 			if code != RESET:
-				#print('add', dictionary[lastcode], dictionary[lastcode if code == len(dictionary) else code][0], file = fileout1)
 				dictionary.append(dictionary[lastcode] + [dictionary[lastcode if code == len(dictionary) else code][0]])
 		codeoptions.append((code, [], dictionary, len(dictionary)))
 		if code == RESET:
@@ -111,18 +105,11 @@ def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 			code2,chars,dictionary2,length = codeoptions[0]
 			if chars in dictionary2[:length]:
 				break
-			codeoptions.pop(0)
-			prefixes = [code for code,word in enumerate(dictionary2[:length]) if word == chars[:len(word)]]
-			prefixes2 = [(code, word) for code,word in enumerate(dictionary2[:length]) if word == chars[:len(word)]]
-			#print('p', prefixes2, code2, file = fileout1)
+			codeoptions.popleft()
+			prefixes = [code for code,word in enumerate(dictionary2) if code < length and word == chars[:len(word)]]
 			index = prefixes.index(code2)
 			length = len(prefixes)
-			# print it or something idk
-			#print('c', chars, prefixes, index, length, file = fileout1)
 			report(index, length)
-		#print('cc', lastcode, code, len(dictionary), file = fileout1)
-		#print('lcode', lastcode, lastcode and lastcode < len(dictionary) and dictionary[lastcode], file = fileout1)
-		#print('code', code, dictionary[code], file = fileout1)
 		yield from dictionary[code]
 		lastcode = code
 
@@ -174,12 +161,8 @@ def compresslzw(initialcodesize, data, choose = lambda length: length - 1):
 		if tuple(word) not in dictionary:
 			# list of all LZW codes that can be emitted at this point - prefixes of word that are in the dictionary
 			choices = [(i, code, word[:i]) for i in range(0, len(word) + 1) for code in dictionary[tuple(word[:i])]]
-			#if word[max(i for i,code in choices)] == word[0]:
-			#	choices.append((max(i for i,code in choices) + 1, dictsize))
 			choices.sort(key = lambda x: x[1])
-			#print('c', word, choices, len(choices))
 			choice = choose(len(choices))
-			#print(choice, choices[choice])
 			i,code,_ = choices[choice] # CONCEAL: the choice of code can hold information
 			yield code
 			if code == RESET:
@@ -194,12 +177,8 @@ def compresslzw(initialcodesize, data, choose = lambda length: length - 1):
 	while len(word) > 0:
 		# list of all LZW codes that can be emitted at this point - prefixes of word that are in the dictionary
 		choices = [(i, code, word[:i]) for i in range(0, len(word) + 1) for code in dictionary[tuple(word[:i])]]
-		#if word[max(i for i,code in choices)] == word[0]:
-		#	choices.append((max(i for i,code in choices) + 1, dictsize))
 		choices.sort(key = lambda x: x[1])
-		#print('c', word, choices, len(choices))
 		choice = choose(len(choices))
-		#print(choice, choices[choice])
 		i,code,_ = choices[choice] # CONCEAL: the choice of code can hold information
 		yield code
 		if code == RESET:
