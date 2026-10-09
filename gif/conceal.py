@@ -29,8 +29,6 @@ def recompressblocks(blocks, initialcodesize, groupdatastream, lzwdatastream):
 			value *= 2
 		# index 1 is always RESET
 		i = comlength - 1 - n
-		i = {0: 1, 1: 0}.get(i, i)
-		#print(comlength, i)
 		return i
 	codes = lzw.compresslzw(initialcodesize + 1, items, choose)
 	data = lzw.packlzw(initialcodesize + 1, codes)

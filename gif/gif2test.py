@@ -13,7 +13,6 @@ def repackblocks(blocks, initialcodesize):
 	codes = lzw.unpacklzw(initialcodesize + 1, blocks.data)
 	choices = []
 	items = list(lzw.decompresslzw(initialcodesize + 1, codes, lambda index, length: choices.append((index, length))))
-	#print(items, file = open('output2.txt', 'w'))
 	def choose(comlength):
 		index,declength = choices.pop(0)
 		assert comlength == declength, f'{comlength}, {declength}'
