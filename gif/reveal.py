@@ -2,6 +2,7 @@ import gif2
 import lzw
 
 import time
+import itertools
 
 with open('cupcake2.gif', 'rb') as f:
 	gif = gif2.GIF.read(f)
@@ -37,15 +38,18 @@ while hiddendata[-1][-1] == 255:
 print(hiddendata)
 
 bits = []
-for index,length in hiddendata2:
+for index,length in itertools.chain.from_iterable(hiddendata2):
 	if length < 8:
 		continue
 	value = 1
-	for bit in f'{index:b}'.rjust(20)[::-1]:
+	n = 0
+	for bit in f'{length - 1 - index:b}'.rjust(20)[::-1]:
 		if n + value >= length:
 			break
-		n += value * (bit == 1)
-		bits.append(bit)
+		n += value * (bit == '1')
+		bits.append(bit == '1')
 		value *= 2
 
-print(bits)
+fff = open('hidden.txt', 'w', encoding = 'utf-8')
+fff.write(''.join(chr(int(''.join(x), 2)) for x in itertools.batched(('01'[bit] for bit in bits), 8)))
+fff.close()
