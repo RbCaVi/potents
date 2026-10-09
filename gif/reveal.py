@@ -23,7 +23,7 @@ for i,block in enumerate(gif.blocks):
 	begin = time.time()
 	match block:
 		case gif2.ImageBlock():
-			print(f'({block.size for block in blocks.blocks[:-1]} bytes) ', end = '')
+			print(f'({sum(block.size for block in block.blocks.blocks[:-1])} bytes) ', end = '')
 			data1,data2 = extractdata(block.blocks, block.initialcodesize)
 			hiddendata.append(data1)
 			hiddendata2.append(data2)
@@ -35,3 +35,17 @@ while hiddendata[-1][-1] == 255:
 		hiddendata = hiddendata[:-1]
 
 print(hiddendata)
+
+bits = []
+for index,length in hiddendata2:
+	if length < 8:
+		continue
+	value = 1
+	for bit in f'{index:b}'.rjust(20)[::-1]:
+		if n + value >= length:
+			break
+		n += value * (bit == 1)
+		bits.append(bit)
+		value *= 2
+
+print(bits)
