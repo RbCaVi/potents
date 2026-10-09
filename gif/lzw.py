@@ -71,8 +71,6 @@ def _packlzw(initialcodesize, codes):
 				yield bits # CONCEAL: extra bits can be added after the END code
 			return # CONCEAL: extra symbols can be added after the END code
 
-fileout1 = open('output1.txt', 'w')
-
 # decompress an iterable of LZW codes into an iterator of data items (used as indexes into the color table)
 def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 	RESET = 1 << (initialcodesize - 1) # code that resets the dictionary
@@ -90,7 +88,6 @@ def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 				prefixes = [code for code,word in enumerate(dictionary2) if code < length and word == chars[:len(word)]]
 				index = prefixes.index(code2)
 				length = len(prefixes)
-				print(code, prefixes, index, length, file = fileout1)
 				report(index, length)
 			return # CONCEAL: extra codes can be added after the END code
 		if lastcode != RESET:
@@ -109,7 +106,6 @@ def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 			prefixes = [code for code,word in enumerate(dictionary2) if code < length and word == chars[:len(word)]]
 			index = prefixes.index(code2)
 			length = len(prefixes)
-			print(code, prefixes, index, length, file = fileout1)
 			report(index, length)
 		yield from dictionary[code]
 		lastcode = code
@@ -139,8 +135,6 @@ def decompresslzwquick(initialcodesize, codes):
 		yield from dictionary[code]
 		lastcode = code
 
-fileout3 = open('output3.txt', 'w')
-
 # compress an iterable of data items into an iterator of LZW codes
 def compresslzw(initialcodesize, data, choose = lambda length: length - 1):
 	def resetdict():
@@ -165,7 +159,6 @@ def compresslzw(initialcodesize, data, choose = lambda length: length - 1):
 			choices.sort(key = lambda x: x[1])
 			choice = choose(len(choices))
 			i,code,_ = choices[choice] # CONCEAL: the choice of code can hold information
-			print(code, [choice[1] for choice in choices], choice, len(choices), file = fileout3)
 			yield code
 			if code == RESET:
 				dictionary,dictsize = resetdict()
@@ -182,7 +175,6 @@ def compresslzw(initialcodesize, data, choose = lambda length: length - 1):
 		choices.sort(key = lambda x: x[1])
 		choice = choose(len(choices))
 		i,code,_ = choices[choice] # CONCEAL: the choice of code can hold information
-		print(code, [choice[1] for choice in choices], choice, len(choices), file = fileout3)
 		yield code
 		if code == RESET:
 			dictionary,dictsize = resetdict()

@@ -9,8 +9,6 @@ with open('cupcake.gif', 'rb') as f:
 	f.seek(0)
 	data1 = f.read()
 
-ff = open('output4.txt', 'w')
-
 hiddendata2 = []
 
 def recompressblocks(blocks, initialcodesize, groupdatastream, lzwdatastream):
@@ -34,7 +32,6 @@ def recompressblocks(blocks, initialcodesize, groupdatastream, lzwdatastream):
 				value *= 2
 			# index 1 is always RESET
 			i = comlength - 1 - n
-		print(i, comlength, file = ff)
 		hiddendata2.append((i, comlength))
 		return i
 	codes = lzw.compresslzw(initialcodesize + 1, items, choose)
@@ -64,7 +61,3 @@ with open('cupcake2.gif', 'wb') as f:
 
 print([*groupdatastream])
 print([*lzwdatastream])
-
-import pickle
-with open('hiddendata2.pkl', 'wb') as f:
-	pickle.dump(hiddendata2, f)
