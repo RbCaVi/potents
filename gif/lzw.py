@@ -84,12 +84,7 @@ def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 
 	for code in codes:
 		if code == END:
-			for code2,chars,dictionary2,length in codeoptions: # drain
-				prefixes = [code for code,word in enumerate(dictionary2) if code < length and word == chars[:len(word)]]
-				index = prefixes.index(code2)
-				length = len(prefixes)
-				report(index, length)
-			return # CONCEAL: extra codes can be added after the END code
+			break # CONCEAL: extra codes can be added after the END code
 		if lastcode != RESET:
 			dictionary.append(dictionary[lastcode] + [dictionary[lastcode if code == len(dictionary) or code == RESET else code][0]])
 		codeoptions.append((code, [], dictionary, len(dictionary)))
@@ -109,6 +104,11 @@ def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 			report(index, length)
 		yield from dictionary[code]
 		lastcode = code
+	for code2,chars,dictionary2,length in codeoptions: # drain
+		prefixes = [code for code,word in enumerate(dictionary2) if code < length and word == chars[:len(word)]]
+		index = prefixes.index(code2)
+		length = len(prefixes)
+		report(index, length)
 
 # decompress an iterable of LZW codes into an iterator of data items (used as indexes into the color table)
 def decompresslzwquick(initialcodesize, codes):
@@ -155,15 +155,21 @@ def compresslzw(initialcodesize, data, choose = lambda length: length - 1):
 	for x in data:
 		if tuple(word) not in dictionary:
 			# list of all LZW codes that can be emitted at this point - prefixes of word that are in the dictionary
-			choices = [(i, code, word[:i]) for i in range(0, len(word) + 1) for code in dictionary[tuple(word[:i])]]
+			choices = [(i, code, word[:i]) for i in range(0, len(word) + 1) for code in dictionary.get(tuple(word[:i]), [])]
 			choices.sort(key = lambda x: x[1])
 			choice = choose(len(choices))
+			if len(choices) == 1:
+				print('WORD     ', word, choice, choices, [(k, v) for k,v in dictionary.items() if k[:2] == tuple(word[:2])])
 			i,code,_ = choices[choice] # CONCEAL: the choice of code can hold information
 			yield code
+			if len(choices) == 1:
+				print('A', sum(len(v) for v in dictionary.values()), len(dictionary))
 			if code == RESET:
 				dictionary,dictsize = resetdict()
 			elif dictsize < 4096:
 				dictionary[tuple(word[:i + 1])].append(dictsize)
+				if len(choices) == 1:
+					print('B', sum(len(v) for v in dictionary.values()), len(dictionary))
 				dictsize += 1
 			word = word[i:]
 		word.append(x)
@@ -171,7 +177,7 @@ def compresslzw(initialcodesize, data, choose = lambda length: length - 1):
 	# drain the last part
 	while len(word) > 0:
 		# list of all LZW codes that can be emitted at this point - prefixes of word that are in the dictionary
-		choices = [(i, code, word[:i]) for i in range(0, len(word) + 1) for code in dictionary[tuple(word[:i])]]
+		choices = [(i, code, word[:i]) for i in range(0, len(word) + 1) for code in dictionary.get(tuple(word[:i]), [])]
 		choices.sort(key = lambda x: x[1])
 		choice = choose(len(choices))
 		i,code,_ = choices[choice] # CONCEAL: the choice of code can hold information

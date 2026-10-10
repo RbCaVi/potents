@@ -1,13 +1,16 @@
 import gif2
 import lzw
 
+# hide data in formatting
+# compression choices
+# sub-block sizes
+# all of this is nuked by discord
+
 import itertools
 import time
 
 with open('cupcake.gif', 'rb') as f:
 	gif = gif2.GIF.read(f)
-	f.seek(0)
-	data1 = f.read()
 
 hiddendata2 = []
 
@@ -20,7 +23,7 @@ def recompressblocks(blocks, initialcodesize, groupdatastream, lzwdatastream):
 			i = 0
 		elif comlength == 2:
 			i = 0
-		elif comlength < 8:
+		elif comlength < 16:
 			i = comlength - 1
 		else:
 			value = 1

@@ -39,7 +39,7 @@ print(hiddendata)
 
 bits = []
 for index,length in itertools.chain.from_iterable(hiddendata2):
-	if length < 8:
+	if length < 16:
 		continue
 	value = 1
 	n = 0
@@ -50,6 +50,6 @@ for index,length in itertools.chain.from_iterable(hiddendata2):
 		bits.append(bit == '1')
 		value *= 2
 
-fff = open('hidden.txt', 'w', encoding = 'utf-8')
-fff.write(''.join(chr(int(''.join(x), 2)) for x in itertools.batched(('01'[bit] for bit in bits), 8)))
+fff = open('hidden.txt', 'wb')
+fff.write(bytes(int(''.join(x), 2) for x in itertools.batched(('01'[bit] for bit in bits), 8)))
 fff.close()

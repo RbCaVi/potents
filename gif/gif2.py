@@ -148,12 +148,16 @@ class CommentExtensionBlock(collections.namedtuple('CommentExtensionBlock', ['da
 class ApplicationExtensionBlock(collections.namedtuple('ApplicationExtensionBlock', ['appid', 'appauth', 'data'])):
 	@staticmethod
 	def read(f):
-		idblock,*blocks = DataBlocks.read(f).blocks
-		# not sure if the first block is required to have exactly 11 bytes
-		appid,appauth = struct.unpack('<8s3s', idblock.data)
-		# appid is the "application identifier" - usually 'NETSCAPE' for animated gifs
-		# appauth is an "application authentication code" - usually '2.0' for animated gifs
-		return ApplicationExtensionBlock(appid, appauth, blocks)
+		blocks = DataBlocks.read(f)
+		try:
+			idblock,*rest = blocks.blocks
+			# not sure if the first block is required to have exactly 11 bytes
+			appid,appauth = struct.unpack('<8s3s', idblock.data)
+			# appid is the "application identifier" - usually 'NETSCAPE' for animated gifs
+			# appauth is an "application authentication code" - usually '2.0' for animated gifs
+			return ApplicationExtensionBlock(appid, appauth, rest)
+		except ValueError, struct.error:
+			return RawExtensionBlock(0xFF, blocks)
 
 	@staticmethod
 	def write(f, block):
@@ -164,22 +168,26 @@ class ApplicationExtensionBlock(collections.namedtuple('ApplicationExtensionBloc
 class GraphicControlExtensionBlock(collections.namedtuple('GraphicControlExtensionBlock', ['delay', 'hastransparent', 'transparent', 'disposal', 'userinput', 'reserved'])):
 	@staticmethod
 	def read(f):
-		# not sure if only one block is allowed
-		datablock, = DataBlocks.read(f).blocks
-		# not sure if the first block is required to have exactly 4 bytes
-		flags,delay,transparent = struct.unpack('<BHB', datablock.data)
-		hastransparent,userinput,disposal,reserved = unpackbits([1, 1, 3, 3], flags)
-		# delay is the time the frame is shown before advancing to the next frame, in 1/100 second
-		# transparent is the color index that is replaced with transparency
-		# hastransparent is if transparent is active
-		# userinput is supposed to mean wait for user input before advancing
-		# disposal determines what happens to the frame when the next frame is rendered
-		#   0 - unspecified
-		#   1 - leave frame
-		#   2 - restore to background
-		#   3 - restore to previous content
-		#   4-7 are undefined
-		return GraphicControlExtensionBlock(delay, hastransparent, transparent, disposal, userinput, reserved)
+		blocks = DataBlocks.read(f)
+		try:
+			# not sure if only one block is allowed
+			datablock, = blocks.blocks
+			# not sure if the first block is required to have exactly 4 bytes
+			flags,delay,transparent = struct.unpack('<BHB', datablock.data)
+			hastransparent,userinput,disposal,reserved = unpackbits([1, 1, 3, 3], flags)
+			# delay is the time the frame is shown before advancing to the next frame, in 1/100 second
+			# transparent is the color index that is replaced with transparency
+			# hastransparent is if transparent is active
+			# userinput is supposed to mean wait for user input before advancing
+			# disposal determines what happens to the frame when the next frame is rendered
+			#   0 - unspecified
+			#   1 - leave frame
+			#   2 - restore to background
+			#   3 - restore to previous content
+			#   4-7 are undefined
+			return GraphicControlExtensionBlock(delay, hastransparent, transparent, disposal, userinput, reserved)
+		except ValueError, struct.error:
+			return RawExtensionBlock(0xF9, blocks)
 
 	@staticmethod
 	def write(f, block):
@@ -190,13 +198,17 @@ class GraphicControlExtensionBlock(collections.namedtuple('GraphicControlExtensi
 class PlaintextExtensionBlock(collections.namedtuple('PlaintextExtensionBlock', ['pos', 'gridsize', 'charsize', 'fg', 'bg', 'blocks'])):
 	@staticmethod
 	def read(f):
-		datablock,*blocks = DataBlocks.read(f)
-		# not sure if the first block is required to have exactly 12 bytes
-		x,y,gridwidth,gridheight,charwidth,charheight,fg,bg = struct.unpack('<HHHHBBBB', datablock.data)
-		# x, y are the top left corner of the grid
-		# gridwidth, gridheight are the size of the text grid in pixels and should be a multiple of charwidth. charheight
-		# charwidth, charheight are the size of each character cell in the grid
-		return PlaintextExtensionBlock((x, y), (gridwidth, gridheight), (charwidth, charheight), fg, bg, blocks)
+		blocks = DataBlocks.read(f)
+		try:
+			datablock,*rest = blocks.blocks
+			# not sure if the first block is required to have exactly 12 bytes
+			x,y,gridwidth,gridheight,charwidth,charheight,fg,bg = struct.unpack('<HHHHBBBB', datablock.data)
+			# x, y are the top left corner of the grid
+			# gridwidth, gridheight are the size of the text grid in pixels and should be a multiple of charwidth. charheight
+			# charwidth, charheight are the size of each character cell in the grid
+			return PlaintextExtensionBlock((x, y), (gridwidth, gridheight), (charwidth, charheight), fg, bg, rest)
+		except ValueError, struct.error:
+			return RawExtensionBlock(0x01, blocks)
 
 	@staticmethod
 	def write(f, block):
@@ -266,7 +278,8 @@ def readextensionblock(f):
 		case 0x01:
 			return PlaintextExtensionBlock.read(f)
 		case b:
-			raise RuntimeError(f'unrecognized GIF block leading byte: 0x{b:0>2x}')
+			return RawExtensionBlock(b, DataBlocks.read(f))
+			#raise RuntimeError(f'unrecognized GIF block leading byte: 0x{b:0>2x}')
 
 def writeextensionblock(f, block):
 	match block:
