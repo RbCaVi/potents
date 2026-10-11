@@ -5,14 +5,14 @@ import time
 import itertools
 import numpy as np
 #C:\\Users\\bvh\\Downloads\\
-with open('C:\\Users\\bvh\\Downloads\\cupcake5.gif', 'rb') as f:
+with open('cupcake5.gif', 'rb') as f:
 	gif = gif2.GIF.read(f)
 
 bits = []
 def addbits(n, count):
 	bits.extend(int(b) for b in f'{n:b}'.rjust(count, '0'))
 
-display = np.zeros(gif.header.size, dtype = np.int64)
+display = np.zeros(gif.header.size[::-1], dtype = np.int64)
 
 for i,block in enumerate(gif.blocks):
 	print(f'block {i}: ', end = '')
@@ -23,17 +23,19 @@ for i,block in enumerate(gif.blocks):
 			gceb = gif.blocks[i - 1]
 			ib = block
 			decoded = list(lzw.decompresslzwquick(block.initialcodesize + 1, lzw.unpacklzw(block.initialcodesize + 1, block.blocks.data)))
-			pixels = np.array(decoded).reshape(block.size)
+			pixels = np.array(decoded).reshape(block.size[::-1])
+			displayarea = display[block.pos[1]:block.pos[1] + block.size[1], block.pos[0]:block.pos[0] + block.size[0]]
 			if gceb.hastransparent:
-				cantransparent = (np.equal(pixels, display[block.pos[0]:block.pos[0] + block.size[0], block.pos[1]:block.pos[1] + block.size[1]]) | np.equal(pixels, gceb.transparent)) & ~np.equal(display[block.pos[0]:block.pos[0] + block.size[0], block.pos[1]:block.pos[1] + block.size[1]], gceb.transparent) & np.less(display[block.pos[0]:block.pos[0] + block.size[0], block.pos[1]:block.pos[1] + block.size[1]], 1 << block.initialcodesize)
-				nontransparent = np.equal(pixels, display[block.pos[0]:block.pos[0] + block.size[0], block.pos[1]:block.pos[1] + block.size[1]]) & ~np.equal(display[block.pos[0]:block.pos[0] + block.size[0], block.pos[1]:block.pos[1] + block.size[1]], gceb.transparent) & np.less(display[block.pos[0]:block.pos[0] + block.size[0], block.pos[1]:block.pos[1] + block.size[1]], 1 << block.initialcodesize)
+				cantransparent = (np.equal(pixels, displayarea) | np.equal(pixels, gceb.transparent)) & ~np.equal(displayarea, gceb.transparent) & np.less(displayarea, 1 << block.initialcodesize)
+				nontransparent = cantransparent & ~np.equal(pixels, gceb.transparent)
 				for b in np.extract(cantransparent, nontransparent):
 					addbits(b, 1)
-				np.copyto(display[block.pos[0]:block.pos[0] + block.size[0], block.pos[1]:block.pos[1] + block.size[1]], pixels, where = ~np.equal(pixels, gceb.transparent))
+				np.copyto(displayarea, pixels, where = ~np.equal(pixels, gceb.transparent))
 			else:
-				display[block.pos[0]:block.pos[0] + block.size[0], block.pos[1]:block.pos[1] + block.size[1]] = pixels
+				displayarea[:] = pixels
 			#print(gceb)
 			#print(ib._replace(blocks = None))
+			print(f'{gceb.disposal} ', end = '')
 			'GraphicControlExtensionBlock', ['delay', 'hastransparent', 'transparent', 'disposal', 'userinput', 'reserved']
 			'ImageBlock', ['pos', 'size', 'lct', 'reserved', 'interlaced', 'initialcodesize', 'blocks']
 	print(f'{time.time() - begin:4f} seconds')
@@ -45,3 +47,7 @@ for i,block in enumerate(gif.blocks):
 fff = open('hidden.txt', 'wb')
 fff.write(bytes(int(''.join(x), 2) for x in itertools.batched(('01'[bit] for bit in bits), 8)))
 fff.close()
+
+# errors moment
+with open('hidden.txt', 'rb') as f1, open('lzw.py', 'rb') as f2:
+	print([b1 - b2 for b1, b2 in itertools.zip_longest(f1.read(), f2.read(), fillvalue = 0) if b1 - b2 != 0])
