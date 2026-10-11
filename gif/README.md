@@ -1,5 +1,5 @@
 # steganographic gif recoder
-i made a couple of programs that can hide some amount of data inside a gif file
+i made a couple of programs that can hide some amount of data inside a gif file.
 
 `gif2.py` and `lzw.py` are the core of this - `gif2.py` is a gif file decoder /
 encoder that returns basically the raw gif file structure, and `lzw.py` has
@@ -10,7 +10,7 @@ functions to encode and decode the LZW compression used in gif files.
 exactly) the same visually, but containing some hidden data that `reveal*.py`
 is able to extract.
 
-`gif2test.py` tests if `gif2.py` and `lzw.py` can perfectly recreate a gif file
+`gif2test.py` tests if `gif2.py` and `lzw.py` can perfectly recreate a gif file.
 
 the rest of the programs (`gif.py`, `2hrgif.py`, `writegif.py`, and
-`gifwritetest.py`) are an older iteration of this project
+`gifwritetest.py`) are an older iteration of this project.
