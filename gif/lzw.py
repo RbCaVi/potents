@@ -72,6 +72,8 @@ def _packlzw(initialcodesize, codes):
 			return # CONCEAL: extra symbols can be added after the END code
 
 # decompress an iterable of LZW codes into an iterator of data items (used as indexes into the color table)
+# computes the list of all codes that could have been chosen at each point,
+# and calls report() with the index of the chosen code in that list, and the length of the list
 def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 	RESET = 1 << (initialcodesize - 1) # code that resets the dictionary
 	END = RESET + 1 # code to mark the end of the LZW data stream
@@ -111,6 +113,7 @@ def decompresslzw(initialcodesize, codes, report = lambda index, length: None):
 		report(index, length)
 
 # decompress an iterable of LZW codes into an iterator of data items (used as indexes into the color table)
+# does not compute possibly chosen codes, and is much faster
 def decompresslzwquick(initialcodesize, codes):
 	RESET = 1 << (initialcodesize - 1) # code that resets the dictionary
 	END = RESET + 1 # code to mark the end of the LZW data stream
@@ -136,6 +139,8 @@ def decompresslzwquick(initialcodesize, codes):
 		lastcode = code
 
 # compress an iterable of data items into an iterator of LZW codes
+# choose is called before each emitted code with the number of codes that can be chosen at that point
+# its return value is the index in the list of possible codes at that point
 def compresslzw(initialcodesize, data, choose = lambda length: length - 1):
 	def resetdict():
 		dictionary = collections.defaultdict(list, {(i,):[i] for i in range(1 << (initialcodesize - 1))})

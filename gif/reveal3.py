@@ -3,7 +3,7 @@ import lzw
 
 import time
 import itertools
-#C:\\Users\\bvh\\Downloads\\
+
 with open('cupcake4.gif', 'rb') as f:
 	gif = gif2.GIF.read(f)
 

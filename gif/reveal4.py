@@ -4,7 +4,7 @@ import lzw
 import time
 import itertools
 import numpy as np
-#C:\\Users\\bvh\\Downloads\\
+
 with open('cupcake5.gif', 'rb') as f:
 	gif = gif2.GIF.read(f)
 

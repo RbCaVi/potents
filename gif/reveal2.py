@@ -3,8 +3,8 @@ import lzw
 
 import time
 import itertools
-#C:\\Users\\bvh\\Downloads\\
-with open('C:\\Users\\bvh\\Downloads\\cupcake3.gif', 'rb') as f:
+
+with open('cupcake3.gif', 'rb') as f:
 	gif = gif2.GIF.read(f)
 
 for i,block in enumerate(gif.blocks):
