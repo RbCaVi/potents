@@ -6,8 +6,6 @@ import itertools
 
 with open('cupcake2.gif', 'rb') as f:
 	gif = gif2.GIF.read(f)
-	f.seek(0)
-	data1 = f.read()
 
 hiddendata = []
 hiddendata2 = []
